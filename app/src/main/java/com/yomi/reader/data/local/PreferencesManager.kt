@@ -1,6 +1,8 @@
 package com.yomi.reader.data.local
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Environment
 import com.yomi.reader.domain.model.DocumentItem
 import com.yomi.reader.domain.model.DocumentType
@@ -393,6 +395,23 @@ class PreferencesManager(context: Context) {
     }
 
     fun clearConnectedDriveFolder() {
+        val currentUri = _connectedDriveFolderUri.value
+        if (!currentUri.isNullOrBlank() && !currentUri.startsWith("http", ignoreCase = true)) {
+            runCatching {
+                val parsed = Uri.parse(currentUri)
+                appContext.contentResolver.releasePersistableUriPermission(
+                    parsed,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            runCatching {
+                val parsed = Uri.parse(currentUri)
+                appContext.contentResolver.releasePersistableUriPermission(
+                    parsed,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+        }
         prefs.edit()
             .remove("connected_drive_folder_uri")
             .remove("connected_drive_folder_name")

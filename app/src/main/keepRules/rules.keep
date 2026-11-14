@@ -12,6 +12,13 @@
 -keep class com.yomi.reader.data.local.entity.** { *; }
 -keep class com.yomi.reader.ui.viewer.annotation.** { *; }
 
+# Keep RoomDatabase subclasses (WorkManager's WorkDatabase_Impl) & WorkManager / Startup
+# classes whose constructors are invoked via reflection under R8 full mode.
+-keep class * extends androidx.room.RoomDatabase { *; }
+-keep class androidx.room.** { *; }
+-keep class androidx.work.** { *; }
+-keep class androidx.startup.** { *; }
+
 # Apache POI, OpenXML schemas, and XMLBeans reflection / schema loading
 -keep class org.apache.poi.** { *; }
 -keep class org.openxmlformats.schemas.** { *; }

@@ -499,6 +499,15 @@ class DashboardViewModel(
         }
     }
 
+    fun unlinkDriveFolder() {
+        preferencesManager?.clearConnectedDriveFolder()
+        _currentFolderPath.value = ""
+        if (_selectedCategory.value == DocumentCategory.GOOGLE_DRIVE) {
+            _selectedCategory.value = DocumentCategory.ALL
+            _searchQuery.value = ""
+        }
+    }
+
     fun resolveExistingLocalCopy(driveUriString: String): DocumentItem? {
         val localUri = preferencesManager?.driveLocalCopies?.value?.get(driveUriString) ?: return null
         val match = uiState.value.allDocuments.firstOrNull { it.uriString == localUri } ?: run {

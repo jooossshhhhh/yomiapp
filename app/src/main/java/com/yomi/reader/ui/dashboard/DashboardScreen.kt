@@ -195,6 +195,7 @@ import com.yomi.reader.ui.dashboard.components.DriveFileGridCard
 import com.yomi.reader.ui.dashboard.components.DriveSignInRequiredDialog
 import com.yomi.reader.ui.dashboard.components.HomeEmptyLibraryCard
 import com.yomi.reader.ui.dashboard.components.PasteDriveFolderLinkDialog
+import com.yomi.reader.ui.dashboard.components.UnlinkDriveFolderDialog
 import com.yomi.reader.ui.dashboard.components.UploadYomiPdfToDriveDialog
 import com.yomi.reader.ui.dashboard.components.YomiBottomNavBar
 import com.yomi.reader.ui.dashboard.components.SelectionTopBar
@@ -253,6 +254,7 @@ fun DashboardScreen(
     var showCreateDriveSubfolderDialog by remember { mutableStateOf(false) }
     var showUploadYomiPdfToDriveDialog by remember { mutableStateOf(false) }
     var showPasteDriveLinkDialog by remember { mutableStateOf(false) }
+    var showUnlinkDriveConfirmDialog by remember { mutableStateOf(false) }
     var showDriveSignInRequiredDialog by remember { mutableStateOf(false) }
     var isOpeningDriveLink by remember { mutableStateOf(false) }
     var driveLinkErrorMessage by remember { mutableStateOf<String?>(null) }
@@ -1261,6 +1263,9 @@ fun DashboardScreen(
                     onPasteDriveLink = {
                         openPasteDriveLinkDialog()
                     },
+                    onUnlinkDriveFolder = {
+                        showUnlinkDriveConfirmDialog = true
+                    },
                     folderIcon = openedCustomFolderAppearance?.icon ?: Icons.Default.Folder,
                     folderAccentColor = openedCustomFolderAppearance?.accentColor
                         ?: MaterialTheme.colorScheme.primary,
@@ -1475,7 +1480,8 @@ fun DashboardScreen(
                                             }
                                         }
                                     },
-                                    onPasteDriveLink = { openPasteDriveLinkDialog() }
+                                    onPasteDriveLink = { openPasteDriveLinkDialog() },
+                                    onUnlinkDriveFolder = { showUnlinkDriveConfirmDialog = true }
                                 )
                             }
 
@@ -1554,6 +1560,7 @@ fun DashboardScreen(
                                 onUploadPdfToDrive = { showUploadYomiPdfToDriveDialog = true },
                                 onCreateDriveSubfolder = { showCreateDriveSubfolderDialog = true },
                                 onPasteDriveLink = { openPasteDriveLinkDialog() },
+                                onUnlinkDriveFolder = { showUnlinkDriveConfirmDialog = true },
                                 folderIcon = openedCustomFolderAppearance?.icon,
                                 folderAccentColor = openedCustomFolderAppearance?.accentColor,
                                 folderContainerColor = openedCustomFolderAppearance?.containerColor,
@@ -2090,6 +2097,7 @@ fun DashboardScreen(
                 }
             },
             onOpenDriveFolderLink = { openPasteDriveLinkDialog() },
+            onUnlinkDriveFolder = { showUnlinkDriveConfirmDialog = true },
             onImportLocalDocument = {
                 filePickerLauncher.launch(
                     arrayOf(
@@ -2395,6 +2403,18 @@ fun DashboardScreen(
                     showPasteDriveLinkDialog = false
                 }
             }
+        )
+    }
+
+    if (showUnlinkDriveConfirmDialog) {
+        UnlinkDriveFolderDialog(
+            folderName = connectedDriveFolderName ?: "Google Drive Folder",
+            onConfirmUnlink = {
+                viewModel.unlinkDriveFolder()
+                showUnlinkDriveConfirmDialog = false
+                Toast.makeText(context, "Unlinked Google Drive folder", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showUnlinkDriveConfirmDialog = false }
         )
     }
 

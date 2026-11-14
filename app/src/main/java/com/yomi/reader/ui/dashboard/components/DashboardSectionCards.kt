@@ -76,6 +76,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderShared
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Warning
@@ -198,6 +199,7 @@ internal fun EmptyFolderDetailState(
     onUploadPdfToDrive: () -> Unit = {},
     onCreateDriveSubfolder: () -> Unit = {},
     onPasteDriveLink: () -> Unit = {},
+    onUnlinkDriveFolder: () -> Unit = {},
     folderIcon: ImageVector? = null,
     folderAccentColor: Color? = null,
     folderContainerColor: Color? = null,
@@ -349,6 +351,18 @@ internal fun EmptyFolderDetailState(
                                 Text("Open Drive App")
                             }
                         }
+                        if (isDriveConnected) {
+                            TextButton(
+                                onClick = onUnlinkDriveFolder,
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Unlink Drive Folder")
+                            }
+                        }
                     }
                 }
                 else -> {
@@ -460,6 +474,7 @@ internal fun DriveWorkspaceCard(
     onSyncNow: () -> Unit,
     onOpenDriveApp: () -> Unit,
     onPasteDriveLink: () -> Unit = {},
+    onUnlinkDriveFolder: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = isYomiDarkTheme()
@@ -541,6 +556,15 @@ internal fun DriveWorkspaceCard(
                         contentDescription = "Paste Drive folder link",
                         tint = if (isSignedIn) driveAccent else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (isSignedIn && connectedFolderUri != null) {
+                    IconButton(onClick = onUnlinkDriveFolder) {
+                        Icon(
+                            imageVector = Icons.Default.LinkOff,
+                            contentDescription = "Unlink Drive folder",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             }
 

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderShared
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -82,6 +83,7 @@ internal fun ImportDocumentChooserDialog(
     onOpenConnectedDriveFolder: () -> Unit,
     onChangeConnectedDriveFolder: () -> Unit,
     onOpenDriveFolderLink: () -> Unit = {},
+    onUnlinkDriveFolder: () -> Unit = {},
     onImportLocalDocument: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -216,6 +218,21 @@ internal fun ImportDocumentChooserDialog(
                                         contentDescription = "Change connected folder",
                                         tint = folderTintColor,
                                         modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                IconButton(
+                                    onClick = {
+                                        onDismiss()
+                                        onUnlinkDriveFolder()
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LinkOff,
+                                        contentDescription = "Unlink Drive folder",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }

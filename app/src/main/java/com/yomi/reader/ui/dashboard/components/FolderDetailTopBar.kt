@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
@@ -96,6 +97,7 @@ fun FolderDetailTopBar(
     onCreateDriveSubfolder: () -> Unit = {},
     onUploadPdfToDrive: () -> Unit = {},
     onPasteDriveLink: () -> Unit = {},
+    onUnlinkDriveFolder: () -> Unit = {},
     folderIcon: ImageVector = Icons.Default.Folder,
     folderAccentColor: Color = MaterialTheme.colorScheme.primary,
     folderContainerColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
@@ -340,6 +342,28 @@ fun FolderDetailTopBar(
                                 onOpenDriveApp()
                             }
                         )
+                        if (isDriveConnected) {
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Unlink Drive folder",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.LinkOff,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onUnlinkDriveFolder()
+                                }
+                            )
+                        }
                     }
 
                     if (!isDriveFolder && hasFiles) {
