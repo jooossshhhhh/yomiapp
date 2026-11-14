@@ -10,22 +10,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.togetherWith
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -1379,19 +1369,8 @@ fun DashboardScreen(
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-            // Google Play Store / Material 3 Fade-Through tab transition (clean scale + fade with zero overlap judder)
-            AnimatedContent(
-                targetState = selectedBottomNav,
-                contentKey = { it },
-                transitionSpec = {
-                    (fadeIn(animationSpec = tween(175, delayMillis = 80, easing = FastOutSlowInEasing)) +
-                        scaleIn(initialScale = 0.975f, animationSpec = tween(195, delayMillis = 80, easing = FastOutSlowInEasing)))
-                        .togetherWith(fadeOut(animationSpec = tween(80, easing = FastOutLinearInEasing)))
-                        .using(SizeTransform(clip = false) { _, _ -> snap() })
-                },
-                label = "DashboardTabContentTransition",
-                modifier = Modifier.fillMaxSize()
-            ) { activeTab ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                val activeTab = selectedBottomNav
                 val tabDocuments = remember(activeTab, uiState.documents, uiState.recentDocuments) {
                     when (activeTab) {
                         2 -> uiState.documents.filter { it.isFavorite }

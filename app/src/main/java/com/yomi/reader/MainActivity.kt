@@ -16,6 +16,8 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -40,17 +42,6 @@ import com.yomi.reader.ui.theme.YomiTheme
 import com.yomi.reader.ui.viewer.DocumentViewerHost
 import kotlinx.coroutines.launch
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.yomi.reader.data.local.PreferencesManager
 import com.yomi.reader.data.local.RecentPdfHistoryHelper
@@ -328,37 +319,11 @@ fun YomiApp(
         else -> AppNavigationState.Dashboard
     }
 
-    AnimatedContent(
-        targetState = navState,
-        contentKey = { screen -> screen::class },
-        transitionSpec = {
-            // Google Play Store / Material 3 Shared-Axis Z transitions (scale + fade depth on GPU)
-            val enterEasing = FastOutSlowInEasing
-            val exitEasing = FastOutLinearInEasing
-            val isForward = targetState is AppNavigationState.Viewer ||
-                targetState is AppNavigationState.Auth ||
-                initialState is AppNavigationState.Splash
-            val spec = if (isForward) {
-                (fadeIn(animationSpec = tween(220, delayMillis = 50, easing = enterEasing)) +
-                    scaleIn(initialScale = 0.96f, animationSpec = tween(250, delayMillis = 40, easing = enterEasing)))
-                    .togetherWith(
-                        fadeOut(animationSpec = tween(110, easing = exitEasing)) +
-                            scaleOut(targetScale = 1.025f, animationSpec = tween(150, easing = exitEasing))
-                    )
-            } else {
-                (fadeIn(animationSpec = tween(190, delayMillis = 40, easing = enterEasing)) +
-                    scaleIn(initialScale = 1.025f, animationSpec = tween(210, delayMillis = 40, easing = enterEasing)))
-                    .togetherWith(
-                        fadeOut(animationSpec = tween(120, easing = exitEasing)) +
-                            scaleOut(targetScale = 0.965f, animationSpec = tween(150, easing = exitEasing))
-                    )
-            }
-            spec.using(SizeTransform(clip = false) { _, _ -> snap() })
-        },
-        label = "AppScreenTransition",
-        modifier = Modifier.fillMaxSize()
-    ) { screen ->
-        when (screen) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        when (val screen = navState) {
             AppNavigationState.Splash -> {
                 YomiSplashScreen(modifier = Modifier.fillMaxSize())
             }
