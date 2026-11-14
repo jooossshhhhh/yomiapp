@@ -4,6 +4,59 @@
 
 ---
 
+## Screenshots
+
+### Authentication & Workspace
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/00_sign_in.png" width="210" alt="Sign In" /><br />
+      <b>Sign In</b><br />
+      <sub>Local account or Google Sign-In</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/00b_sign_up.png" width="210" alt="Create Account" /><br />
+      <b>Create Account</b><br />
+      <sub>Instant account setup & password validation</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/01_home.png" width="210" alt="Home Dashboard" /><br />
+      <b>Home Dashboard</b><br />
+      <sub>Continue Reading card, search & recents</sub>
+    </td>
+  </tr>
+</table>
+
+### Folders, Quick Suite, PDF Reader & Updates
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/02_folders.png" width="180" alt="Folders & Google Drive" /><br />
+      <b>Folders & Drive Workspace</b><br />
+      <sub>Custom folders & read-safe Drive sync</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/03_quick_suite.png" width="180" alt="Yomi Quick Suite" /><br />
+      <b>Yomi Quick Suite</b><br />
+      <sub>Quick navigation & built-in PDF tools</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/04_pdf_viewer.png" width="180" alt="PDF Reader" /><br />
+      <b>Multi-Mode PDF Reader</b><br />
+      <sub>Thumbnails, zoom presets & annotations</sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/06_about_yomi.png" width="180" alt="About Yomi" /><br />
+      <b>About Yomi & Updates</b><br />
+      <sub>Built-in updater, FAQ & credits</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## Key Features
 
 - **Multi-Mode PDF Reader**
@@ -50,4 +103,11 @@
    ```properties
    conversion.proxy.url=https://yomi-conversion-proxy.<your-subdomain>.workers.dev
    ```
+
+---
+
+## Credits
+
+- **Developer**: Jude Lawrence L. Sinugbuhan
+- **Product & UX Advisors**: Mark June Repunte & Jherico Maurin
 
