@@ -1036,7 +1036,7 @@ fun ProfileSettingsContent(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = "Acknowledgement • UI & Functionality Consultants",
+                                text = "Product & UX Advisors",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
