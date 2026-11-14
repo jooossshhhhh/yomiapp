@@ -68,7 +68,7 @@ object GitHubUpdateChecker {
             // Try /releases/latest first; if 404 (e.g., only pre-releases exist on GitHub), fall back to /releases
             val releaseJson = fetchLatestReleaseJson()
                 ?: return@withContext Result.failure(
-                    IllegalStateException("No published releases found on GitHub ($GITHUB_OWNER/$GITHUB_REPO) yet.")
+                    IllegalStateException("Yomi is up to date (v$installedVersion).")
                 )
 
             val parsed = parseReleaseJson(releaseJson, installedVersion)
@@ -241,7 +241,7 @@ object GitHubUpdateChecker {
     }
 
     private fun formatPublishedDate(isoString: String): String {
-        if (isoString.isBlank()) return "Latest GitHub Release"
+        if (isoString.isBlank()) return "Latest Release"
         return try {
             val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                 timeZone = TimeZone.getTimeZone("UTC")

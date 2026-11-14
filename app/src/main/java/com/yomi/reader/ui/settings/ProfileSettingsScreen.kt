@@ -995,36 +995,65 @@ fun ProfileSettingsContent(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                Column(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Developer",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Jude Lawrence L. Sinugbuhan",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = "Developer",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
                         )
-                        Text(
-                            text = "Jude Lawrence L. Sinugbuhan",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Acknowledgement • UI & Functionality Consultants",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Mark June Repunte and Jherico Maurin",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // App Updates & GitHub Release Checker
+            // App Updates Checker
             val hasNewUpdate = latestReleaseInfo?.isUpdateAvailable == true
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -1063,7 +1092,7 @@ fun ProfileSettingsContent(
                                 text = if (hasNewUpdate) {
                                     "Update Available: v${latestReleaseInfo?.versionName}"
                                 } else {
-                                    "App Updates (v$appVersionName)"
+                                    "Check for Updates"
                                 },
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
@@ -1075,10 +1104,10 @@ fun ProfileSettingsContent(
                             )
                             Text(
                                 text = when {
-                                    isCheckingUpdates -> "Checking GitHub Releases..."
-                                    hasNewUpdate -> "Tap to view What's New & download APK"
-                                    latestReleaseInfo != null -> "Up to date with GitHub (${latestReleaseInfo?.tagName})"
-                                    else -> "Check GitHub for new versions & fixes"
+                                    isCheckingUpdates -> "Checking for updates..."
+                                    hasNewUpdate -> "Tap to view What's New & download update"
+                                    latestReleaseInfo != null -> "You're on the latest version (v$appVersionName)"
+                                    else -> "Current version: v$appVersionName"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1094,7 +1123,7 @@ fun ProfileSettingsContent(
                             if (!NetworkUtils.isOnline(context)) {
                                 Toast.makeText(
                                     context,
-                                    "Connect to the internet to check GitHub for updates.",
+                                    "Connect to the internet to check for updates.",
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 return@OutlinedButton
@@ -1134,7 +1163,7 @@ fun ProfileSettingsContent(
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = if (hasNewUpdate) "View Update" else "Check",
+                                text = if (hasNewUpdate) "View Update" else "Check for Updates",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )

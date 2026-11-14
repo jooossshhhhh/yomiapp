@@ -217,7 +217,7 @@ fun AppUpdateDialog(
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("View on GitHub", fontSize = 12.sp)
+                Text("Release Details", fontSize = 12.sp)
             }
         },
         dismissButton = {
