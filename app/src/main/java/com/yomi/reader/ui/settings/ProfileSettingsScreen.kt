@@ -147,7 +147,12 @@ import com.yomi.reader.ui.theme.yomiDriveBorderColor
 import com.yomi.reader.ui.theme.yomiDriveOnSurfaceColor
 import com.yomi.reader.ui.theme.yomiDriveSurfaceColor
 import com.yomi.reader.ui.theme.yomiPaperBackground
+import com.yomi.reader.ui.components.AppUpdateDialog
+import com.yomi.reader.util.GitHubReleaseInfo
+import com.yomi.reader.util.GitHubUpdateChecker
+import com.yomi.reader.util.NetworkUtils
 import com.yomi.reader.util.PdfToolsHelper
+import androidx.compose.material.icons.filled.SystemUpdate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -192,11 +197,12 @@ fun ProfileSettingsContent(
     var showPhotoOptionsSheet by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showDownloadLocationDialog by remember { mutableStateOf(false) }
+    var isCheckingUpdates by remember { mutableStateOf(false) }
+    var latestReleaseInfo by remember { mutableStateOf<GitHubReleaseInfo?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
 
     val appVersionName = remember(context) {
-        runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "1.0"
+        GitHubUpdateChecker.getInstalledVersionName(context)
     }
 
     val lastSyncedText = remember(lastDriveSyncTime) {
@@ -216,6 +222,11 @@ fun ProfileSettingsContent(
         cacheSize = size
         managedFileCount = managed.first
         managedStorageSize = managed.second
+        if (NetworkUtils.isOnline(context)) {
+            GitHubUpdateChecker.checkForUpdates(context).onSuccess { info ->
+                latestReleaseInfo = info
+            }
+        }
     }
 
     // Folder picker launcher for connecting a Drive or local folder directly from settings
@@ -1011,6 +1022,127 @@ fun ProfileSettingsContent(
                 }
             }
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // App Updates & GitHub Release Checker
+            val hasNewUpdate = latestReleaseInfo?.isUpdateAvailable == true
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (hasNewUpdate) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                },
+                border = if (hasNewUpdate) {
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                } else {
+                    null
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = if (hasNewUpdate) {
+                                    "Update Available: v${latestReleaseInfo?.versionName}"
+                                } else {
+                                    "App Updates (v$appVersionName)"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (hasNewUpdate) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                            Text(
+                                text = when {
+                                    isCheckingUpdates -> "Checking GitHub Releases..."
+                                    hasNewUpdate -> "Tap to view What's New & download APK"
+                                    latestReleaseInfo != null -> "Up to date with GitHub (${latestReleaseInfo?.tagName})"
+                                    else -> "Check GitHub for new versions & fixes"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            if (isCheckingUpdates) return@OutlinedButton
+                            if (!NetworkUtils.isOnline(context)) {
+                                Toast.makeText(
+                                    context,
+                                    "Connect to the internet to check GitHub for updates.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                return@OutlinedButton
+                            }
+                            isCheckingUpdates = true
+                            coroutineScope.launch {
+                                val res = GitHubUpdateChecker.checkForUpdates(context)
+                                isCheckingUpdates = false
+                                res.onSuccess { info ->
+                                    latestReleaseInfo = info
+                                    showUpdateDialog = true
+                                }.onFailure { err ->
+                                    Toast.makeText(
+                                        context,
+                                        err.message ?: "Could not check for updates right now.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        },
+                        enabled = !isCheckingUpdates,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        if (isCheckingUpdates) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Checking", fontSize = 12.sp)
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (hasNewUpdate) "View Update" else "Check",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             FilledTonalButton(
@@ -1083,6 +1215,16 @@ fun ProfileSettingsContent(
                 .navigationBarsPadding()
         )
     }
+    }
+
+    if (showUpdateDialog) {
+        val info = latestReleaseInfo
+        if (info != null) {
+            AppUpdateDialog(
+                releaseInfo = info,
+                onDismiss = { showUpdateDialog = false }
+            )
+        }
     }
 
     // Profile Photo Action Sheet

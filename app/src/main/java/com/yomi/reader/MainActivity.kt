@@ -55,7 +55,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import com.yomi.reader.data.local.PreferencesManager
 import com.yomi.reader.data.local.RecentPdfHistoryHelper
 import com.yomi.reader.data.local.ThemeMode
+import com.yomi.reader.ui.components.AppUpdateDialog
 import com.yomi.reader.ui.components.YomiSplashScreen
+import com.yomi.reader.util.GitHubReleaseInfo
+import com.yomi.reader.util.GitHubUpdateChecker
+import com.yomi.reader.util.NetworkUtils
 
 class MainActivity : ComponentActivity() {
 
@@ -285,6 +289,7 @@ fun YomiApp(
     var isAuthLoading by remember { mutableStateOf(false) }
     var authErrorMessage by remember { mutableStateOf<String?>(null) }
     var pendingDriveImportUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var startupUpdateInfo by remember { mutableStateOf<GitHubReleaseInfo?>(null) }
     val dashboardUiState by viewModel.uiState.collectAsState()
     val recordedRecentPdfs by preferencesManager.recentPdfs.collectAsState()
     val recentPdfDocuments = remember(recordedRecentPdfs, dashboardUiState.recentDocuments) {
@@ -298,6 +303,13 @@ fun YomiApp(
         if (showSplash) {
             kotlinx.coroutines.delay(900L)
             showSplash = false
+        }
+        if (NetworkUtils.isOnline(context)) {
+            GitHubUpdateChecker.checkForUpdates(context).onSuccess { info ->
+                if (info.isUpdateAvailable && GitHubUpdateChecker.shouldAutoPromptForTag(context, info.tagName)) {
+                    startupUpdateInfo = info
+                }
+            }
         }
     }
 
@@ -492,5 +504,16 @@ fun YomiApp(
                 )
             }
         }
+    }
+
+    val pendingUpdate = startupUpdateInfo
+    if (pendingUpdate != null && !showSplash) {
+        AppUpdateDialog(
+            releaseInfo = pendingUpdate,
+            onDismiss = {
+                GitHubUpdateChecker.markUpdatePromptDismissed(context, pendingUpdate.tagName)
+                startupUpdateInfo = null
+            }
+        )
     }
 }
