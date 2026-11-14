@@ -1,6 +1,10 @@
 # Add project specific R8 rules here.
 # AGP will combine all keep rule files in src/main/keepRules to pass to R8
 
+# Skip class/member renaming pass so R8 naming dictionary does not OOM over
+# Apache POI / OpenXML XMLBeans' 10k+ generated schema classes while keeping shrinking active.
+-dontobfuscate
+
 # Keep Yomi domain/data/auth models and BuildConfig
 -keep class com.yomi.reader.BuildConfig { *; }
 -keep class com.yomi.reader.auth.** { *; }

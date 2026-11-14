@@ -47,12 +47,37 @@ android {
         buildConfigField("String", "ILOVEPDF_SECRET_KEY", "\"${directKeyOrBlank("ilovepdf.secret.key")}\"")
     }
 
+    val releaseStorePath = localProps.getProperty("release.store.file", "").trim()
+    val releaseStoreFile = if (releaseStorePath.isNotEmpty()) rootProject.file(releaseStorePath) else null
+    val hasReleaseSigning = releaseStoreFile?.exists() == true &&
+        localProps.getProperty("release.store.password", "").isNotBlank() &&
+        localProps.getProperty("release.key.alias", "").isNotBlank() &&
+        localProps.getProperty("release.key.password", "").isNotBlank()
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = localProps.getProperty("release.store.password")
+                keyAlias = localProps.getProperty("release.key.alias")
+                keyPassword = localProps.getProperty("release.key.password")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
             }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "src/main/keepRules/rules.keep"
+            )
         }
     }
     compileOptions {
