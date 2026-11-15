@@ -57,6 +57,19 @@
 
 ---
 
+## Why Yomi? (Advantages Over Typical PDF Viewer Apps)
+
+| Capability | Typical Android PDF Viewers | Yomi |
+| :--- | :--- | :--- |
+| **Office-to-PDF Conversion** | Cloud-only uploads, subscription paywalls, or no Office support | **100% offline on-device LibreOfficeKit (`arm64-v8a`)** with unlimited conversions & zero cloud uploads |
+| **Long / Complex Word & Excel Fidelity** | Broken tables, clipped text boxes, sliced figures, or shrunk multi-page Excel splits | **`DocxPreProcessor` & `XlsxPreProcessor`** unclip shapes/rows, keep layered figures intact, and fit Excel sheets to 1 A4 page |
+| **Crash Protection** | Malformed Office files crash the whole app | **Isolated `:converter` service process** (`LibreOfficePdfBridge`) keeps UI & reading sessions safe |
+| **Google Drive Handling** | Online-only streaming or risky write access | **Read-safe Drive Workspace** with local `Offline ready` caching, hideable `0%–100%` progress, and mid-sync interruption recovery |
+| **PDF Editing & Tools** | Basic viewing only or locked behind pro subscriptions | Built-in **ink, highlights, sticky notes, flattened export, Merge, Split, and Images-to-PDF** |
+| **Privacy & Account Lock-In** | Mandatory sign-in, ads, or server telemetry | **No ads, no tracking**, works fully without an account for local files, and supports Light / Dark / Sepia themes |
+
+---
+
 ## Key Features
 
 - **Multi-Mode PDF Reader**
