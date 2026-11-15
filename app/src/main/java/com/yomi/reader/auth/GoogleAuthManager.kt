@@ -265,8 +265,10 @@ class GoogleAuthManager(private val context: Context) {
             saveUser(user)
             Result.success(user)
         } catch (e: GetCredentialCancellationException) {
+            Log.w(TAG, "Google sign-in cancelled/aborted: type=${e.type}, msg=${e.errorMessage}", e)
             Result.failure(Exception("Sign-in cancelled by user"))
         } catch (e: GetCredentialCustomException) {
+            Log.w(TAG, "Google sign-in custom error: type=${e.type}, msg=${e.errorMessage}", e)
             val msg = when {
                 e.type.contains("28436", ignoreCase = true) || e.message?.contains("28436") == true ->
                     "Google OAuth Error [28436]: Credential Manager requires a 'Web Application' client ID as the serverClientId in Google Cloud Console."
@@ -276,6 +278,7 @@ class GoogleAuthManager(private val context: Context) {
             }
             Result.failure(Exception(msg))
         } catch (e: GetCredentialException) {
+            Log.w(TAG, "Google sign-in credential error: type=${e.type}, msg=${e.errorMessage}", e)
             val msg = if (e.message?.contains("16") == true) {
                 "Google OAuth Error [16]: No matching credential found. Ensure a Web Client ID is used in serverClientId and SHA-1 matches in Google Cloud Console."
             } else {

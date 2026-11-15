@@ -41,7 +41,7 @@ object GitHubUpdateChecker {
     fun getInstalledVersionName(context: Context): String {
         return runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "1.0.0-beta"
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "1.0.6"
     }
 
     fun shouldAutoPromptForTag(context: Context, tagName: String, nowMs: Long = System.currentTimeMillis()): Boolean {
@@ -137,6 +137,7 @@ object GitHubUpdateChecker {
 
         var apkUrl: String? = null
         var apkSizeLabel: String? = null
+        var bestPriority = Int.MIN_VALUE
         val assets = json.optJSONArray("assets")
         if (assets != null) {
             for (i in 0 until assets.length()) {
@@ -144,13 +145,24 @@ object GitHubUpdateChecker {
                 val assetName = asset.optString("name", "")
                 val downloadUrl = asset.optString("browser_download_url", "")
                 if (assetName.endsWith(".apk", ignoreCase = true) && downloadUrl.isNotBlank()) {
-                    apkUrl = downloadUrl
-                    val sizeBytes = asset.optLong("size", 0L)
-                    if (sizeBytes > 0L) {
-                        val mb = sizeBytes.toDouble() / (1024.0 * 1024.0)
-                        apkSizeLabel = String.format(Locale.US, "%.1f MB", mb)
+                    val lowerName = assetName.lowercase(Locale.US)
+                    val priority = when {
+                        lowerName.contains("arm64") -> 3
+                        lowerName.contains("universal") -> 2
+                        !lowerName.contains("armeabi") && !lowerName.contains("x86") -> 1
+                        else -> 0
                     }
-                    break
+                    if (priority > bestPriority) {
+                        bestPriority = priority
+                        apkUrl = downloadUrl
+                        val sizeBytes = asset.optLong("size", 0L)
+                        apkSizeLabel = if (sizeBytes > 0L) {
+                            val mb = sizeBytes.toDouble() / (1024.0 * 1024.0)
+                            String.format(Locale.US, "%.1f MB", mb)
+                        } else {
+                            null
+                        }
+                    }
                 }
             }
         }

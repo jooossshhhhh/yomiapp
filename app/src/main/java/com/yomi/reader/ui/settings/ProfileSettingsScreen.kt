@@ -1457,7 +1457,7 @@ fun ProfileSettingsContent(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    LicenseItem(name = "Apache POI", license = "Apache License 2.0 (Office docx/xlsx/pptx parser)")
+                    LicenseItem(name = "LibreOfficeKit (LibreOffice Core)", license = "Mozilla Public License 2.0 (MPL-2.0 — Offline Office conversion)")
                     LicenseItem(name = "Jetpack Compose", license = "Apache License 2.0 (Google UI toolkit)")
                     LicenseItem(name = "AndroidX DocumentFile", license = "Apache License 2.0 (SAF directory tree access)")
                     LicenseItem(name = "Coil Compose", license = "Apache License 2.0 (Image loading)")
@@ -1617,15 +1617,15 @@ fun ProfileSettingsContent(
         val faqs = listOf(
             FaqGuideEntry(
                 category = "Tools & Viewer",
-                title = "How does Offline-First Office conversion & failover work?",
-                body = "When importing or opening Word (.docx/.doc), Excel (.xlsx/.xls), or PowerPoint (.pptx/.ppt) files, Yomi automatically runs its on-device Offline Engine first with unlimited free conversions.\n• Converted PDFs open and save directly inside Yomi—no automatic copy is downloaded to public device storage unless you tap Download.\n• If offline conversion fails while online, Yomi automatically fails over to cloud backup APIs (up to 5 cloud backup conversions per day per user).",
+                title = "How does Office-to-PDF conversion work?",
+                body = "When importing or opening Word (.docx/.doc), Excel (.xlsx/.xls), or PowerPoint (.pptx/.ppt) files, Yomi converts them completely on your device using its bundled LibreOfficeKit Offline Engine—no internet connection, cloud upload, or usage limits required.\n• Word Fidelity: Automatically unclips overflowing text boxes, table rows, and line spacing, merges layered figures/insets cleanly, and recovers off-page diagrams so multi-page documents stay complete.\n• Excel Fit-to-Page: Automatically removes awkward manual page breaks and scales each worksheet cleanly onto 1 A4 page (portrait or landscape).\n• Converted PDFs open and save privately inside Yomi—no copy is written to shared device storage unless you tap Download.",
                 icon = Icons.Default.Sync,
                 tint = if (isFaqDark) Color(0xFF34D399) else Color(0xFF00897B)
             ),
             FaqGuideEntry(
                 category = "Tools & Viewer",
                 title = "What tools are in the Yomi Quick Suite & Converted Files?",
-                body = "Tap the Yomi logo in the top-left corner of Home to open Quick Suite:\n• Starred & Converted Files shortcuts\n• Google Drive Workspace (requires sign-in)\n• Import & Convert Document (PDF, Word, Excel, PowerPoint)\n• Images to PDF & Split Pages\n• Quick Device Scan\n\nIn Converted Files, you can search, sort, switch List/Grid views, tap ⋮ or long-press cards for multiple selection (batch Download, Share, or Delete), or tap + to add more files right there.",
+                body = "Tap the Yomi logo in the top-left corner of Home to open Quick Suite:\n• Starred & Converted Files shortcuts\n• Google Drive Workspace (requires sign-in)\n• Import & Convert Document (PDF, Word, Excel, PowerPoint)\n• Merge PDFs, Split Pages & Images to PDF\n• Quick Device Scan\n\nIn Converted Files, you can search, sort, switch List/Grid views, tap ⋮ or long-press cards for multiple selection (batch Download, Share, or Delete), or tap + to add more files right there.",
                 icon = Icons.Default.AutoAwesome,
                 tint = if (isFaqDark) Color(0xFFBBA8FF) else Color(0xFF7E57C2)
             ),
@@ -1639,21 +1639,21 @@ fun ProfileSettingsContent(
             FaqGuideEntry(
                 category = "Storage & Cache",
                 title = "How does Yomi manage Storage vs. Temporary Render Cache?",
-                body = "Yomi separates temporary cache files from your saved documents:\n• Temporary Render Cache (app cacheDir): Stores page preview thumbnails (pdf_thumbs), page snapshots, temporary Drive/API preview files, and export staging files so scrolling and previews stay fast.\n• Clearing Cache (Profile & Settings → Storage & Cache → Clear): Safely removes those temporary files and recalculates freed space. It NEVER deletes your imported PDFs, Converted Files, Custom Folders, Favorites, Highlights, or Bookmarks—needed thumbnails simply re-render when viewed again.",
+                body = "Yomi separates temporary render cache from both offline Drive cache and your saved documents:\n• Temporary Render Cache (app cacheDir): Stores page preview thumbnails (pdf_thumbs), page snapshots, and conversion staging files so scrolling stays fast.\n• Clearing Cache (Profile & Settings → Storage & Cache → Clear): Safely removes temporary render files and recalculates freed space. It NEVER deletes your imported PDFs, Converted Files, Offline-Ready Drive cache, Custom Folders, Favorites, Highlights, or Bookmarks—needed thumbnails simply re-render when viewed again.",
                 icon = Icons.Default.CleaningServices,
                 tint = if (isFaqDark) Color(0xFFFBBF24) else Color(0xFFF57C00)
             ),
             FaqGuideEntry(
                 category = "Storage & Cache",
-                title = "Where are Managed, Converted & Downloaded files stored?",
-                body = "• Inside Yomi (App-Private Documents Storage): Converted PDFs (Converted_PDFs), Imported PDFs (Imported_PDFs), merged images (Images_to_PDF), and split extracts (Split_PDFs) live privately inside Yomi until you delete them or uninstall the app, and their count/size appear under Storage & Cache → Managed & Converted Files.\n• Device Downloads (Exported Copies): Files are only written to shared device storage when you explicitly choose Download. Choose Documents/Yomi (Default), Downloads/Yomi, or a Custom Folder in Profile & Settings → Download Management.\n• Home Downloads Icon: Tap the Downloads icon in the Home top bar to view/open downloaded records or clear the list (clearing history only removes the list entries, not the files already saved on your device).",
+                title = "Where are Managed, Converted, Cached Drive & Downloaded files stored?",
+                body = "• Inside Yomi (App-Private Documents Storage): Converted PDFs (Converted_PDFs), Imported PDFs (Imported_PDFs), merged images (Images_to_PDF), and split extracts (Split_PDFs) live privately inside Yomi until you delete them or uninstall the app, and their count/size appear under Storage & Cache → Managed & Converted Files.\n• Offline Drive Cache (app-private drive_cache): Synced Drive files stay cached locally so they show \"Offline ready\" and open or convert without internet. Unlinking the Drive folder automatically deletes temporary Drive cache to free storage while keeping all PDFs you already converted or saved.\n• Device Downloads (Exported Copies): Files are only written to shared device storage when you explicitly choose Download. Choose Documents/Yomi (Default), Downloads/Yomi, or a Custom Folder in Profile & Settings → Download Management.\n• Home Downloads Icon: Tap the Downloads icon in the Home top bar to view/open downloaded records or clear the list (clearing history only removes list entries, not exported files).",
                 icon = Icons.Default.Storage,
                 tint = if (isFaqDark) Color(0xFFA78BFA) else Color(0xFF5E35B1)
             ),
             FaqGuideEntry(
                 category = "Drive & Folders",
-                title = "Why does Google Drive require Sign-In, and how does it work?",
-                body = "Google Drive Workspace is locked when browsing without an account so Drive folders, sync, and shared links require signing in first. If you tap any Google Drive option while signed out, Yomi lets you choose Sign In or Continue Without Drive (keeping all local PDF, conversion, folder, and viewer tools fully usable).\n\nOnce signed in:\n• Pick File: Import files directly from Google Drive.\n• Connect Drive Folder or Paste Folder Link: Browse Drive subfolders in read-safe mode, save local copies into Yomi, optionally enable Auto Refresh Drive Folder in Settings, or unlink anytime.",
+                title = "How do Google Drive Workspace, Offline Sync & Folder Links work?",
+                body = "Google Drive Workspace requires signing in so Drive folders, sync, and shared links stay tied to your workspace. If signed out, tapping any Drive option lets you choose Sign In or Continue Without Drive (keeping all local PDF, offline conversion, folder, and viewer tools fully usable).\n\nOnce signed in:\n• Pick File or Paste Folder Link / Connect Folder: Browse shared Drive folders in read-safe mode (Office lock/temp files like ~$* are skipped automatically), unlink anytime, or toggle Auto Refresh Drive Folder in Settings.\n• Background Sync & Hideable Progress: During sync, Yomi caches supported files for offline use and shows accurate 0%–100% progress. Tap Hide anytime to keep browsing while syncing finishes.\n• Interrupted Internet Modal: If your connection drops mid-sync, Yomi notifies you that the folder hasn't finished syncing while keeping every already-cached \"Offline ready\" file usable offline—reconnect and tap Sync later to fetch the rest.",
                 icon = Icons.Default.CloudDone,
                 tint = yomiDriveAccentColor()
             ),
@@ -1666,8 +1666,8 @@ fun ProfileSettingsContent(
             ),
             FaqGuideEntry(
                 category = "Account & Privacy",
-                title = "What stays local vs. what uses an account or theme settings?",
-                body = "• Local & Private: All local PDFs, annotations, bookmarks, custom folders, download preferences, and Offline Engine conversions stay 100% on your device.\n• Accounts: Use Yomi without signing in for local workflows, or sign in (Google or local account) to enable Google Drive Workspace. Editing your Yomi display name or profile photo only updates your local profile and never modifies your Google Account.\n• Appearance & Scanning: In Profile & Settings, pick Light, Dark, or System theme, choose List or Grid layout (2, 3, or 4 columns), and toggle Auto-Scan on Launch.",
+                title = "What stays local, and how do App Updates & Profile settings work?",
+                body = "• Local & Private: All local PDFs, annotations, bookmarks, custom folders, download preferences, and LibreOfficeKit Office-to-PDF conversions stay 100% on your device.\n• Accounts & Appearance: Sign in (Google or local account) only when you want Google Drive Workspace. Editing your Yomi display name or profile photo only updates your local profile. In Profile & Settings, choose Light, Dark, or System theme, List or Grid layout (2–4 columns), and toggle Auto-Scan on Launch.\n• Built-In App Updates: Yomi checks GitHub Releases on launch (or manually via Profile & Settings → About Yomi → Check for Updates). Tap Update Now to download the latest signed release APK directly—installing it updates Yomi in-place without deleting your saved PDFs, folders, or Drive links.",
                 icon = Icons.Default.Security,
                 tint = if (isFaqDark) Color(0xFF4ADE80) else Color(0xFF2E7D32)
             )

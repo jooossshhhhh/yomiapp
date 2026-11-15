@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.yomi.reader.data.local.PreferencesManager
+import com.yomi.reader.data.remote.IncompleteDriveSyncException
 import com.yomi.reader.domain.model.DocumentCategory
 import com.yomi.reader.domain.model.DocumentItem
 import com.yomi.reader.domain.model.DocumentSortOrder
@@ -20,12 +21,19 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+data class DriveSyncInterruptedAlert(
+    val folderName: String,
+    val cachedCount: Int,
+    val totalCount: Int
+)
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class DashboardViewModel(
@@ -37,6 +45,13 @@ class DashboardViewModel(
     private val _searchQuery = MutableStateFlow("")
     private val _isScanning = MutableStateFlow(false)
     private val _isDriveSyncing = MutableStateFlow(false)
+    private val _driveSyncProgress = MutableStateFlow<Pair<Int?, String?>>(null to null)
+    private val _driveSyncInterruptedAlert = MutableStateFlow<DriveSyncInterruptedAlert?>(null)
+    val driveSyncInterruptedAlert: StateFlow<DriveSyncInterruptedAlert?> = _driveSyncInterruptedAlert.asStateFlow()
+
+    fun dismissDriveSyncInterruptedAlert() {
+        _driveSyncInterruptedAlert.value = null
+    }
     private val _currentFolderPath = MutableStateFlow("")
     private val _sortOrder = MutableStateFlow(DocumentSortOrder.DATE_DESC)
     private val _fallbackGridView = MutableStateFlow(false)
@@ -69,8 +84,8 @@ class DashboardViewModel(
         DriveDataBundle(folders, files, localCopies, rootUri, rootName)
     }
 
-    private val _syncState = combine(_isScanning, _isDriveSyncing) { scanning, driveSyncing ->
-        Pair(scanning, driveSyncing)
+    private val _syncState = combine(_isScanning, _isDriveSyncing, _driveSyncProgress) { scanning, driveSyncing, driveProgress ->
+        Triple(scanning, driveSyncing, driveProgress)
     }
 
     private val _selectedCustomFolder = MutableStateFlow<String?>(null)
@@ -91,7 +106,8 @@ class DashboardViewModel(
             Tuple4(sync, cFolders, cStyles, selFolder)
         }
     ) { (rawDocs, allDocs, recents, category), (query, currentPath, sortOrder, isGrid), (isFavsOnly, driveData), (sync, cFolders, cStyles, selFolder) ->
-        val (scanning, driveSyncing) = sync
+        val (scanning, driveSyncing, driveProgress) = sync
+        val (driveSyncPct, driveSyncStatus) = driveProgress
         val (allFolders, allDriveFiles, driveLocalCopies, rootUri, rootName) = driveData
         val isDriveLinkMode = rootUri?.startsWith("http", ignoreCase = true) == true
 
@@ -185,6 +201,8 @@ class DashboardViewModel(
             isLoading = false,
             isScanning = scanning,
             isDriveSyncing = driveSyncing,
+            driveSyncProgressPercent = driveSyncPct,
+            driveSyncStatusText = driveSyncStatus,
             isDriveLinkMode = isDriveLinkMode,
             currentFolderPath = currentPath,
             currentFolderDisplayName = folderDisplayName,
@@ -419,13 +437,17 @@ class DashboardViewModel(
     fun syncDriveFolder(treeUri: Uri, onComplete: ((Int) -> Unit)? = null) {
         viewModelScope.launch {
             _isDriveSyncing.value = true
+            _driveSyncProgress.value = 0 to "Starting Drive offline sync..."
             try {
-                val syncedCount = repository.syncDriveFolder(treeUri)
+                val syncedCount = repository.syncDriveFolder(treeUri) { _, _, pct, status ->
+                    _driveSyncProgress.value = pct to status
+                }
                 onComplete?.invoke(syncedCount)
             } catch (_: Exception) {
                 onComplete?.invoke(0)
             } finally {
                 _isDriveSyncing.value = false
+                _driveSyncProgress.value = null to null
             }
         }
     }
@@ -437,22 +459,36 @@ class DashboardViewModel(
     ) {
         viewModelScope.launch {
             _isDriveSyncing.value = true
+            _driveSyncProgress.value = 0 to "Connecting to shared Drive folder..."
             try {
                 val res = repository.syncDriveLinkFolder(
                     folderUrlOrId = linkInput,
                     parentPath = "",
                     accessToken = accessToken
-                )
+                ) { _, _, pct, status ->
+                    _driveSyncProgress.value = pct to status
+                }
+                val err = res.exceptionOrNull()
                 if (res.isSuccess) {
                     _currentFolderPath.value = ""
                     _selectedCustomFolder.value = null
                     _selectedCategory.value = DocumentCategory.GOOGLE_DRIVE
+                } else if (err is IncompleteDriveSyncException) {
+                    _currentFolderPath.value = ""
+                    _selectedCustomFolder.value = null
+                    _selectedCategory.value = DocumentCategory.GOOGLE_DRIVE
+                    _driveSyncInterruptedAlert.value = DriveSyncInterruptedAlert(
+                        folderName = err.folderName,
+                        cachedCount = err.cachedCount,
+                        totalCount = err.totalCount
+                    )
                 }
                 onResult(res)
             } catch (e: Exception) {
                 onResult(Result.failure(e))
             } finally {
                 _isDriveSyncing.value = false
+                _driveSyncProgress.value = null to null
             }
         }
     }
@@ -471,29 +507,45 @@ class DashboardViewModel(
             }
             viewModelScope.launch {
                 _isDriveSyncing.value = true
+                _driveSyncProgress.value = 0 to "Syncing Drive files for offline access..."
                 try {
                     val res = repository.syncDriveLinkFolder(
                         folderUrlOrId = activeUrl,
                         parentPath = currentPath,
                         accessToken = accessToken
-                    )
+                    ) { _, _, pct, status ->
+                        _driveSyncProgress.value = pct to status
+                    }
+                    val err = res.exceptionOrNull()
+                    if (err is IncompleteDriveSyncException) {
+                        _driveSyncInterruptedAlert.value = DriveSyncInterruptedAlert(
+                            folderName = err.folderName,
+                            cachedCount = err.cachedCount,
+                            totalCount = err.totalCount
+                        )
+                    }
                     onComplete?.invoke(res)
                 } catch (e: Exception) {
                     onComplete?.invoke(Result.failure(e))
                 } finally {
                     _isDriveSyncing.value = false
+                    _driveSyncProgress.value = null to null
                 }
             }
         } else {
             viewModelScope.launch {
                 _isDriveSyncing.value = true
+                _driveSyncProgress.value = 0 to "Syncing Drive folder for offline access..."
                 try {
-                    val count = repository.syncDriveFolder(Uri.parse(connectedUri))
+                    val count = repository.syncDriveFolder(Uri.parse(connectedUri)) { _, _, pct, status ->
+                        _driveSyncProgress.value = pct to status
+                    }
                     onComplete?.invoke(Result.success("$count file(s) refreshed"))
                 } catch (e: Exception) {
                     onComplete?.invoke(Result.failure(e))
                 } finally {
                     _isDriveSyncing.value = false
+                    _driveSyncProgress.value = null to null
                 }
             }
         }

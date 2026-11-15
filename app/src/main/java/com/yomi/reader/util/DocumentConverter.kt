@@ -3,19 +3,19 @@ package com.yomi.reader.util
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.util.Xml
 import com.yomi.reader.domain.model.DocumentItem
 import com.yomi.reader.domain.model.DocumentType
-import com.yomi.reader.parser.docx.DocxContentParser
-import com.yomi.reader.parser.docx.DocxElement
 import com.yomi.reader.parser.pdf.PdfTextExtractor
-import com.yomi.reader.util.conversion.CloudProxyConverter
-import com.yomi.reader.util.conversion.ConversionQuotaHelper
-import com.yomi.reader.util.conversion.ConversionQuotaStore
+import com.yomi.reader.util.conversion.LibreOfficePdfBridge
 import com.yomi.reader.util.conversion.OfflineDocumentConverter
-import com.yomi.reader.util.conversion.QuotaExhaustedException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.xmlpull.v1.XmlPullParser
 import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+import java.util.zip.ZipInputStream
 
 data class ConversionSuccess(
     val file: File,
@@ -26,8 +26,8 @@ data class ConversionSuccess(
 object DocumentConverter {
 
     /**
-     * Converts any supported Office document (DOCX, XLSX, PPTX) to a high-fidelity PDF.
-     * Automatically uses the cloud API when online and the offline engine when offline.
+     * Converts any supported Office document (DOCX, XLSX, PPTX) to a PDF using the on-device
+     * offline conversion engine.
      */
     suspend fun convertOfficeToPdf(
         context: Context,
@@ -41,8 +41,7 @@ object DocumentConverter {
     )
 
     /**
-     * Converts an office file URI directly to a PDF before indexing.
-     * Automatically detects connectivity: online API when connected, offline engine when disconnected.
+     * Converts an office file URI directly to a PDF on-device before indexing.
      */
     suspend fun convertUriToPdf(
         context: Context,
@@ -55,8 +54,7 @@ object DocumentConverter {
     }
 
     /**
-     * Detailed conversion returning information on whether the result was generated offline or online.
-     * Automatically chooses the cloud API when internet connectivity is present, otherwise converts offline.
+     * Converts an office or supported image/text URI to PDF using Yomi's on-device Offline Engine.
      */
     suspend fun convertUriToPdfDetailed(
         context: Context,
@@ -65,18 +63,9 @@ object DocumentConverter {
         onProgress: (Int) -> Unit = {},
         outputBaseName: String? = null
     ): Result<ConversionSuccess> = withContext(Dispatchers.IO) {
-        val outputDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Converted_PDFs").apply {
-            if (!exists()) mkdirs()
-        }
         val baseName = outputBaseName?.takeIf { it.isNotBlank() } ?: fileName.substringBeforeLast('.')
-        val targetFile = File(outputDir, "${baseName}_converted.pdf")
 
         onProgress(5)
-        val isOnline = NetworkUtils.isOnline(context)
-        val hasDailyBudget = ConversionQuotaStore.hasDailyCloudQuotaRemaining(context)
-
-        // Automatic Offline-First: always use the local offline engine first (0 credits, stays in Yomi),
-        // and only fail over to Cloud APIs automatically if offline conversion fails.
         val offlineRes = OfflineDocumentConverter.convertToPdf(
             context = context,
             fileUri = fileUri,
@@ -87,139 +76,12 @@ object DocumentConverter {
         if (offlineRes.isSuccess) {
             onProgress(100)
             return@withContext offlineRes.map {
-                ConversionQuotaStore.recordLastConversionEngine(context, "Offline Engine")
-                ConversionSuccess(file = it, isOffline = true, engineName = "Offline Engine")
+                ConversionSuccess(file = it, isOffline = true, engineName = "LibreOfficeKit Offline")
             }
         }
 
-        var backupCloudError: Throwable? = null
-        if (isOnline && hasDailyBudget) {
-            val (cloudBackup, cloudErr) = tryCloudCascade(
-                context = context,
-                fileUri = fileUri,
-                fileName = fileName,
-                targetFile = targetFile,
-                onProgress = onProgress
-            )
-            if (cloudBackup != null) {
-                return@withContext Result.success(cloudBackup)
-            }
-            backupCloudError = cloudErr
-        }
-
-        val errorMsg = offlineRes.exceptionOrNull()?.message
-            ?: backupCloudError?.message
-            ?: if (isOnline && !hasDailyBudget) {
-                "Offline conversion failed and daily cloud limit (${ConversionQuotaHelper.DAILY_CLOUD_CONVERSION_LIMIT}/day) reached"
-            } else {
-                "Conversion failed"
-            }
+        val errorMsg = offlineRes.exceptionOrNull()?.message ?: "Conversion failed"
         Result.failure(IllegalStateException(errorMsg))
-    }
-
-    private suspend fun tryCloudCascade(
-        context: Context,
-        fileUri: Uri,
-        fileName: String,
-        targetFile: File,
-        onProgress: (Int) -> Unit
-    ): Pair<ConversionSuccess?, Throwable?> {
-        var lastCloudError: Throwable? = null
-
-        // Step 0: Serverless Middleman Proxy (Cloudflare Worker) — keeps API keys off the APK
-        if (ConversionQuotaHelper.isValidProxyUrl(ApiConfig.CONVERSION_PROXY_URL)) {
-            val proxyResult = CloudProxyConverter.convertOfficeToPdf(
-                context = context,
-                fileUri = fileUri,
-                fileName = fileName,
-                onProgress = onProgress
-            )
-            if (proxyResult.isSuccess) {
-                val proxyOut = proxyResult.getOrThrow()
-                proxyOut.pdfFile.copyTo(targetFile, overwrite = true)
-                ConversionQuotaStore.recordSuccessfulCloudConversion(context)
-                ConversionQuotaStore.recordLastConversionEngine(context, proxyOut.providerLabel)
-                onProgress(100)
-                return ConversionSuccess(
-                    file = targetFile,
-                    isOffline = false,
-                    engineName = proxyOut.providerLabel
-                ) to null
-            }
-            lastCloudError = proxyResult.exceptionOrNull()
-        }
-
-        val iloveKeys = ApiConfig.collectOrderedKeys(
-            ApiConfig.ILOVEPDF_PUBLIC_KEY,
-            ApiConfig.ILOVEPDF_BACKUP_PUBLIC_KEY,
-            ConversionQuotaStore.getBackupIlovePdfKey(context)
-        )
-        for ((index, key) in iloveKeys.withIndex()) {
-            if (!ConversionQuotaStore.isSlotAvailable(context, "ilove", key)) continue
-            val iloveResult = ILovePdfConverter.convertOfficeToPdf(
-                context = context,
-                fileUri = fileUri,
-                fileName = fileName,
-                publicKey = key,
-                onProgress = onProgress
-            )
-            if (iloveResult.isSuccess) {
-                val converted = iloveResult.getOrThrow()
-                converted.copyTo(targetFile, overwrite = true)
-                val engineLabel = if (index == 0) "iLovePDF Primary" else "iLovePDF Backup"
-                ConversionQuotaStore.recordSuccessfulCloudConversion(context)
-                ConversionQuotaStore.recordLastConversionEngine(context, engineLabel)
-                onProgress(100)
-                return ConversionSuccess(file = targetFile, isOffline = false, engineName = engineLabel) to null
-            }
-            val err = iloveResult.exceptionOrNull()
-            lastCloudError = err
-            if (err is QuotaExhaustedException) {
-                ConversionQuotaStore.markSlotQuotaExhausted(
-                    context = context,
-                    providerPrefix = "ilove",
-                    apiKey = key,
-                    reason = err.message ?: "Quota exhausted"
-                )
-            }
-        }
-
-        val ccKeys = ApiConfig.collectOrderedKeys(
-            ApiConfig.CLOUDCONVERT_API_KEY,
-            ApiConfig.CLOUDCONVERT_BACKUP_API_KEY,
-            ConversionQuotaStore.getBackupCloudConvertKey(context)
-        )
-        for ((index, key) in ccKeys.withIndex()) {
-            if (!ConversionQuotaStore.isSlotAvailable(context, "cc", key)) continue
-            val ccResult = CloudConvertConverter.convertOfficeToPdf(
-                context = context,
-                fileUri = fileUri,
-                fileName = fileName,
-                apiKey = key,
-                onProgress = onProgress
-            )
-            if (ccResult.isSuccess) {
-                val converted = ccResult.getOrThrow()
-                converted.copyTo(targetFile, overwrite = true)
-                val engineLabel = if (index == 0) "CloudConvert Engine" else "CloudConvert Backup"
-                ConversionQuotaStore.recordSuccessfulCloudConversion(context)
-                ConversionQuotaStore.recordLastConversionEngine(context, engineLabel)
-                onProgress(100)
-                return ConversionSuccess(file = targetFile, isOffline = false, engineName = engineLabel) to null
-            }
-            val err = ccResult.exceptionOrNull()
-            lastCloudError = err
-            if (err is QuotaExhaustedException) {
-                ConversionQuotaStore.markSlotQuotaExhausted(
-                    context = context,
-                    providerPrefix = "cc",
-                    apiKey = key,
-                    reason = err.message ?: "Quota exhausted"
-                )
-            }
-        }
-
-        return null to lastCloudError
     }
 
     /**
@@ -249,9 +111,7 @@ object DocumentConverter {
                     PdfTextExtractor.extractText(context, Uri.parse(document.uriString))
                 }
                 DocumentType.WORD -> {
-                    val parser = DocxContentParser(context)
-                    val model = parser.parseDocumentModel(Uri.parse(document.uriString))
-                    model.elements.filterIsInstance<DocxElement.Paragraph>().joinToString("\n\n") { it.text }
+                    extractWordPlainText(context, Uri.parse(document.uriString), document.title)
                 }
                 else -> {
                     return@withContext Result.failure(IllegalArgumentException("Unsupported format for text extraction"))
@@ -269,6 +129,95 @@ object DocumentConverter {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private suspend fun extractWordPlainText(
+        context: Context,
+        uri: Uri,
+        title: String
+    ): String {
+        val ext = title.substringAfterLast('.', "docx").lowercase()
+        if (ext == "docx") {
+            val xmlText = extractDocxXmlPlainText(context, uri)
+            if (xmlText != null) {
+                return xmlText
+            }
+        }
+
+        // Legacy .doc / fallback: extract via LibreOfficeKit's plain text filter
+        val workDir = File(context.cacheDir, "lok_work").apply { mkdirs() }
+        val jobId = UUID.randomUUID().toString()
+        val tempInput = File(workDir, "$jobId.$ext")
+        val tempOutput = File(workDir, "${jobId}_out.txt")
+        return try {
+            val stream = context.contentResolver.openInputStream(uri)
+                ?: throw IllegalArgumentException("Cannot open Word file at $uri")
+            stream.use { input ->
+                FileOutputStream(tempInput).use { output -> input.copyTo(output) }
+            }
+            val result = LibreOfficePdfBridge.convert(
+                context = context,
+                inputFile = tempInput,
+                outputFile = tempOutput,
+                format = "txt"
+            )
+            result.getOrThrow().readText(Charsets.UTF_8)
+        } finally {
+            tempInput.delete()
+            tempOutput.delete()
+        }
+    }
+
+    private fun extractDocxXmlPlainText(context: Context, uri: Uri): String? {
+        val stream = context.contentResolver.openInputStream(uri) ?: return null
+        stream.use { raw ->
+            ZipInputStream(raw).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (entry.name == "word/document.xml") {
+                        val parser = Xml.newPullParser()
+                        parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+                        parser.setInput(zip, "UTF-8")
+
+                        val paragraphs = mutableListOf<String>()
+                        val currentPara = StringBuilder()
+                        var inText = false
+                        var event = parser.eventType
+                        while (event != XmlPullParser.END_DOCUMENT) {
+                            when (event) {
+                                XmlPullParser.START_TAG -> {
+                                    when (parser.name) {
+                                        "w:p" -> currentPara.setLength(0)
+                                        "w:t" -> inText = true
+                                        "w:tab" -> currentPara.append('\t')
+                                        "w:br", "w:cr" -> currentPara.append('\n')
+                                    }
+                                }
+                                XmlPullParser.TEXT -> if (inText) {
+                                    currentPara.append(parser.text)
+                                }
+                                XmlPullParser.END_TAG -> {
+                                    when (parser.name) {
+                                        "w:t" -> inText = false
+                                        "w:p" -> {
+                                            val text = currentPara.toString().trimEnd()
+                                            if (text.isNotEmpty()) {
+                                                paragraphs.add(text)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            event = parser.next()
+                        }
+                        return paragraphs.joinToString("\n\n")
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+        }
+        return null
     }
 
     /**

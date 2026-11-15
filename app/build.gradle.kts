@@ -12,17 +12,6 @@ val localProps = Properties().apply {
     }
 }
 
-fun localProp(key: String): String =
-    localProps.getProperty(key, "").replace("\"", "\\\"")
-
-val proxyUrlProp = localProp("conversion.proxy.url").trim()
-val embedDirectKeys = localProps.getProperty("conversion.embed.direct.keys", "")
-    .trim()
-    .equals("true", ignoreCase = true) || proxyUrlProp.isEmpty()
-
-fun directKeyOrBlank(key: String): String =
-    if (embedDirectKeys) localProp(key) else ""
-
 android {
     namespace = "com.yomi.reader"
     compileSdk {
@@ -33,18 +22,14 @@ android {
         applicationId = "com.yomi.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0-beta"
+        versionCode = 3
+        versionName = "1.0.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "CONVERSION_PROXY_URL", "\"$proxyUrlProp\"")
-        buildConfigField("String", "CONVERSION_PROXY_TOKEN", "\"${localProp("conversion.proxy.token")}\"")
-        buildConfigField("String", "CLOUDCONVERT_API_KEY", "\"${directKeyOrBlank("cloudconvert.api.key")}\"")
-        buildConfigField("String", "CLOUDCONVERT_BACKUP_API_KEY", "\"${directKeyOrBlank("cloudconvert.backup.api.key")}\"")
-        buildConfigField("String", "ILOVEPDF_PUBLIC_KEY", "\"${directKeyOrBlank("ilovepdf.public.key")}\"")
-        buildConfigField("String", "ILOVEPDF_BACKUP_PUBLIC_KEY", "\"${directKeyOrBlank("ilovepdf.backup.public.key")}\"")
-        buildConfigField("String", "ILOVEPDF_SECRET_KEY", "\"${directKeyOrBlank("ilovepdf.secret.key")}\"")
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     val releaseStorePath = localProps.getProperty("release.store.file", "").trim()
@@ -66,6 +51,13 @@ android {
     }
 
     buildTypes {
+        if (hasReleaseSigning) {
+            debug {
+                // Keep local debug builds on the same signing certificate as release so
+                // Google Sign-In SHA-1 matches Google Cloud Console and release APKs upgrade cleanly.
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
@@ -90,6 +82,9 @@ android {
         buildConfig = true
     }
     packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/DEPENDENCIES"
@@ -123,10 +118,6 @@ dependencies {
 
     // Coil Image Loading
     implementation(libs.coil.compose)
-
-    // Apache POI (Office format parsing: docx, xlsx, pptx)
-    implementation(libs.apache.poi)
-    implementation(libs.apache.poi.ooxml)
 
     // Document File
     implementation(libs.androidx.documentfile)

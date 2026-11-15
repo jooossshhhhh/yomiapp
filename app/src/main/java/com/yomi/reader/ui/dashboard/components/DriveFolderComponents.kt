@@ -47,6 +47,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -279,6 +280,7 @@ internal fun DriveReadOnlyNoticeBanner(
 internal fun DriveFileCard(
     driveFile: DriveFileItem,
     isSavedLocally: Boolean,
+    isCachedOffline: Boolean = false,
     onOpenAsLocalCopy: () -> Unit,
     onSaveFreshCopy: () -> Unit,
     onShareLocalCopy: (() -> Unit)? = null,
@@ -305,6 +307,8 @@ internal fun DriveFileCard(
     }
     val actionHint = when {
         isSavedLocally -> "Saved in Yomi"
+        isCachedOffline && driveFile.type == DocumentType.PDF -> "Offline ready • Tap to open"
+        isCachedOffline -> "Offline ready • Tap to convert to PDF"
         driveFile.type == DocumentType.PDF -> "Tap to download & open"
         else -> "Tap to convert to PDF"
     }
@@ -942,6 +946,8 @@ internal fun PasteDriveFolderLinkDialog(
     recentLinks: List<SavedDriveLink>,
     initialLink: String = "",
     isLoading: Boolean = false,
+    syncProgressPercent: Int? = null,
+    syncStatusText: String? = null,
     errorMessage: String? = null,
     restrictedFallbackUrl: String? = null,
     onSubmitLink: (String) -> Unit,
@@ -954,7 +960,7 @@ internal fun PasteDriveFolderLinkDialog(
     val clipboard = LocalClipboardManager.current
 
     AlertDialog(
-        onDismissRequest = { if (!isLoading) onDismiss() },
+        onDismissRequest = onDismiss,
         icon = {
             Icon(
                 imageVector = Icons.Default.AddLink,
@@ -998,16 +1004,44 @@ internal fun PasteDriveFolderLinkDialog(
                 )
 
                 if (isLoading) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.padding(vertical = 4.dp)
+                    val pct = syncProgressPercent ?: 0
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
                     ) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = syncStatusText ?: "Syncing Drive files for offline access...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${pct}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { (pct / 100f).coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        )
                         Text(
-                            text = "Loading shared Google Drive folder...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            text = "You can tap Hide to browse while files continue caching offline.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -1119,8 +1153,8 @@ internal fun PasteDriveFolderLinkDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isLoading) {
-                Text("Cancel")
+            TextButton(onClick = onDismiss) {
+                Text(if (isLoading) "Hide" else "Cancel")
             }
         }
     )
@@ -1144,7 +1178,7 @@ internal fun UnlinkDriveFolderDialog(
         title = { Text("Unlink Drive Folder?", fontWeight = FontWeight.Bold) },
         text = {
             Text(
-                text = "\"$folderName\" will be unlinked from Yomi. Your original Google Drive folder and any local copies already saved in Yomi will not be deleted.",
+                text = "\"$folderName\" will be unlinked and its offline cached Drive files will be deleted to free up space. Your original Google Drive folder and any PDFs already converted or saved in Yomi will be kept.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

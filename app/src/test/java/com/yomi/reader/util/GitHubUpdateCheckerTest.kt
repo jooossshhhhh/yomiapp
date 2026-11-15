@@ -14,6 +14,8 @@ class GitHubUpdateCheckerTest {
         assertTrue(GitHubUpdateChecker.isRemoteVersionNewer("1.0.0-beta", "v1.0.1-beta"))
         assertTrue(GitHubUpdateChecker.isRemoteVersionNewer("1.0.0", "v1.1.0"))
         assertFalse(GitHubUpdateChecker.isRemoteVersionNewer("1.1.0", "v1.0.0-beta"))
+        assertTrue(GitHubUpdateChecker.isRemoteVersionNewer("1.0.0-beta", "v1.0.5"))
+        assertFalse(GitHubUpdateChecker.isRemoteVersionNewer("1.0.5", "v1.0.5"))
         assertTrue(GitHubUpdateChecker.isRemoteVersionNewer("1.0.0-beta.1", "v1.0.0-beta.2"))
     }
 

@@ -21,6 +21,9 @@ class DriveFolderSafetyHelperTest {
         assertFalse(DriveFolderSafetyHelper.isSupportedDriveFile("Archive.zip"))
         assertFalse(DriveFolderSafetyHelper.isSupportedDriveFile("README"))
         assertFalse(DriveFolderSafetyHelper.isSupportedDriveFile(""))
+        assertFalse(DriveFolderSafetyHelper.isSupportedDriveFile("~\$ARMACEUTICAL_RESOURCES_DISTRIBUTION.docx"))
+        assertFalse(DriveFolderSafetyHelper.isSupportedDriveFile(".~lock.Notes.docx#"))
+        assertFalse(DriveFolderSafetyHelper.isSupportedDriveFile("Thumbs.db"))
     }
 
     @Test

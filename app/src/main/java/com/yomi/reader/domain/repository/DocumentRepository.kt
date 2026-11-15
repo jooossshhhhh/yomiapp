@@ -25,8 +25,16 @@ interface DocumentRepository {
     suspend fun updateDocumentsFolder(ids: Set<Long>, folderName: String)
     suspend fun renameDocument(id: Long, newTitle: String)
     suspend fun scanStorageForDocuments(): Int
-    suspend fun syncDriveFolder(treeUri: android.net.Uri): Int
-    suspend fun syncDriveLinkFolder(folderUrlOrId: String, parentPath: String = "", accessToken: String? = null): Result<String>
+    suspend fun syncDriveFolder(
+        treeUri: android.net.Uri,
+        onProgress: (completed: Int, total: Int, percent: Int, statusText: String) -> Unit = { _, _, _, _ -> }
+    ): Int
+    suspend fun syncDriveLinkFolder(
+        folderUrlOrId: String,
+        parentPath: String = "",
+        accessToken: String? = null,
+        onProgress: (completed: Int, total: Int, percent: Int, statusText: String) -> Unit = { _, _, _, _ -> }
+    ): Result<String>
     suspend fun createDriveSubfolder(treeUri: android.net.Uri, parentPath: String, folderName: String): Result<DriveFolderItem>
     suspend fun uploadPdfToDriveFolder(treeUri: android.net.Uri, parentPath: String, sourcePdfUri: android.net.Uri, desiredFileName: String): Result<DriveFileItem>
 }

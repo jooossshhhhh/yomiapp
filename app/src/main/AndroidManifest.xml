@@ -76,6 +76,11 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".util.conversion.LibreOfficeConversionService"
+            android:exported="false"
+            android:process=":converter" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

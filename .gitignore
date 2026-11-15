@@ -26,6 +26,10 @@ config/*.json
 
 # Scratch Screenshots & Temp
 yomi_live*.png
+.lok-staging/
+
+# Local Documentation (kept offline only)
+documentation/
 
 # Backend / Cloudflare Worker local files
 node_modules/

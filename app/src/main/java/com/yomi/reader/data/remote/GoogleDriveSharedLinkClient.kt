@@ -27,6 +27,13 @@ class RestrictedDriveFolderException(
     override val message: String
 ) : IllegalStateException(message)
 
+class IncompleteDriveSyncException(
+    val folderName: String,
+    val cachedCount: Int,
+    val totalCount: Int,
+    override val message: String
+) : IllegalStateException(message)
+
 /**
  * Fetches Google Drive shared folder listings and downloads supported files cleanly without API keys
  * for link-shared ("Anyone with the link") folders, or via Drive API v3 when an OAuth token is passed.
@@ -131,7 +138,8 @@ object GoogleDriveSharedLinkClient {
     suspend fun downloadDriveUrlToFile(
         sourceUrl: String,
         targetFile: File,
-        accessToken: String? = null
+        accessToken: String? = null,
+        onProgressBytes: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
             val driveId = DriveSharedLinkHelper.extractDriveIdFromDownloadUrl(sourceUrl)
@@ -186,9 +194,25 @@ object GoogleDriveSharedLinkClient {
                 }
 
                 targetFile.parentFile?.let { if (!it.exists()) it.mkdirs() }
+                val totalLength = conn.contentLengthLong
                 conn.inputStream.use { input ->
                     FileOutputStream(targetFile).use { output ->
-                        input.copyTo(output)
+                        val buffer = ByteArray(16 * 1024)
+                        var copied = 0L
+                        var lastReported = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            if (read > 0) {
+                                output.write(buffer, 0, read)
+                                copied += read
+                                if (onProgressBytes != null && (copied - lastReported >= 65_536L)) {
+                                    lastReported = copied
+                                    onProgressBytes(copied, totalLength)
+                                }
+                            }
+                        }
+                        onProgressBytes?.invoke(copied, totalLength)
                     }
                 }
                 conn.disconnect()
@@ -206,17 +230,24 @@ object GoogleDriveSharedLinkClient {
             .find(html)?.groupValues?.getOrNull(1)
         val confirmVal = Regex("""name="confirm"\s+value="([^"]+)"""").find(html)?.groupValues?.getOrNull(1)
         val uuidVal = Regex("""name="uuid"\s+value="([^"]+)"""").find(html)?.groupValues?.getOrNull(1)
+        val atVal = Regex("""name="at"\s+value="([^"]+)"""").find(html)?.groupValues?.getOrNull(1)
         val idVal = Regex("""name="id"\s+value="([^"]+)"""").find(html)?.groupValues?.getOrNull(1) ?: fileId
 
-        if (idVal.isNullOrBlank()) return null
+        if (idVal.isNullOrBlank()) {
+            val hrefMatch = Regex("""href="([^"]*export=download[^"]*)"""", RegexOption.IGNORE_CASE)
+                .find(html)?.groupValues?.getOrNull(1)
+                ?.replace("&amp;", "&")
+            return hrefMatch
+        }
         val base = actionMatch?.replace("&amp;", "&") ?: "https://drive.usercontent.google.com/download"
         val sep = if (base.contains('?')) "&" else "?"
         val confirm = confirmVal ?: "t"
         val uuidPart = if (!uuidVal.isNullOrBlank()) "&uuid=${URLEncoder.encode(uuidVal, "UTF-8")}" else ""
+        val atPart = if (!atVal.isNullOrBlank()) "&at=${URLEncoder.encode(atVal, "UTF-8")}" else ""
         return if (base.contains("id=")) {
-            "${base}${sep}export=download&confirm=$confirm$uuidPart"
+            "${base}${sep}export=download&confirm=$confirm$uuidPart$atPart"
         } else {
-            "${base}${sep}id=$idVal&export=download&confirm=$confirm$uuidPart"
+            "${base}${sep}id=$idVal&export=download&confirm=$confirm$uuidPart$atPart"
         }
     }
 

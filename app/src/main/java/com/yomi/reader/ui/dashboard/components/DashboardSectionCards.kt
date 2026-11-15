@@ -468,6 +468,10 @@ internal fun DriveWorkspaceCard(
     connectedFolderUri: String?,
     connectedFolderName: String?,
     isSyncing: Boolean,
+    syncProgressPercent: Int? = null,
+    syncStatusText: String? = null,
+    isProgressHidden: Boolean = false,
+    onHideProgress: () -> Unit = {},
     isSignedIn: Boolean = true,
     onOpenDriveFolder: () -> Unit,
     onConnectDriveFolder: () -> Unit,
@@ -610,6 +614,10 @@ internal fun DriveWorkspaceCard(
                     ) {
                         if (isSyncing) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = driveAccent)
+                            if (syncProgressPercent != null) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("${syncProgressPercent}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
                         } else {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -636,6 +644,56 @@ internal fun DriveWorkspaceCard(
                     ) {
                         Text("Open Drive App")
                     }
+                }
+            }
+
+            if (isSyncing && syncProgressPercent != null && !isProgressHidden) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = syncStatusText ?: "Syncing Drive files for offline access...",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "${syncProgressPercent}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = driveAccent
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            onClick = onHideProgress,
+                            shape = RoundedCornerShape(6.dp),
+                            color = driveAccent.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                text = "Hide",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = driveAccent,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    LinearProgressIndicator(
+                        progress = { (syncProgressPercent / 100f).coerceIn(0f, 1f) },
+                        color = driveAccent,
+                        trackColor = driveAccent.copy(alpha = 0.16f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                    )
                 }
             }
         }

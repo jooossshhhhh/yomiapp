@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yomi.reader.util.GitHubReleaseInfo
+import com.yomi.reader.util.GitHubUpdateChecker
 
 @Composable
 fun AppUpdateDialog(
@@ -165,64 +167,97 @@ fun AppUpdateDialog(
                 }
 
                 if (isUpdateAvailable) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Your settings, connected Google Drive folder, cached files, and saved PDFs are preserved during updates.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
                         onClick = {
-                            val targetUrl = releaseInfo.apkDownloadUrl ?: releaseInfo.htmlUrl
                             runCatching {
                                 context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(releaseInfo.htmlUrl)).apply {
                                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     }
                                 )
-                            }.onFailure {
-                                Toast.makeText(context, "Unable to open download link", Toast.LENGTH_SHORT).show()
                             }
-                            onDismiss()
                         },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(
-                            imageVector = Icons.Default.FileDownload,
+                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        val sizeSuffix = releaseInfo.apkSizeLabel?.let { " ($it)" } ?: ""
-                        Text(
-                            text = "Download Update APK$sizeSuffix",
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val sizeSuffix = releaseInfo.apkSizeLabel?.let { " • APK $it" } ?: ""
+                        Text("Release Details$sizeSuffix", fontSize = 12.sp)
                     }
                 }
             }
         },
         confirmButton = {
-            FilledTonalButton(
-                onClick = {
-                    runCatching {
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(releaseInfo.htmlUrl)).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                        )
-                    }
-                },
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Release Details", fontSize = 12.sp)
+            if (isUpdateAvailable) {
+                Button(
+                    onClick = {
+                        val targetUrl = releaseInfo.apkDownloadUrl ?: releaseInfo.htmlUrl
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                        }.onFailure {
+                            Toast.makeText(context, "Unable to open download link", Toast.LENGTH_SHORT).show()
+                        }
+                        onDismiss()
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FileDownload,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Update Now", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
+            } else {
+                FilledTonalButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(releaseInfo.htmlUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Release Details", fontSize = 12.sp)
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(if (isUpdateAvailable) "Remind Later" else "Close")
+            TextButton(
+                onClick = {
+                    if (isUpdateAvailable) {
+                        GitHubUpdateChecker.markUpdatePromptDismissed(context, releaseInfo.tagName)
+                    }
+                    onDismiss()
+                }
+            ) {
+                Text(if (isUpdateAvailable) "Update Later" else "Close")
             }
         }
     )

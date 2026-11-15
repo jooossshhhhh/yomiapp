@@ -14,7 +14,12 @@ object DriveFolderSafetyHelper {
     }
 
     fun isSupportedDriveFile(fileName: String): Boolean {
-        val ext = fileName.substringAfterLast('.', "")
+        val cleanName = fileName.trim()
+        val lower = cleanName.lowercase()
+        if (cleanName.startsWith("~$") || lower.startsWith(".~lock.") || lower == "thumbs.db" || lower == ".ds_store") {
+            return false
+        }
+        val ext = cleanName.substringAfterLast('.', "")
         return ext.isNotEmpty() && isSupportedDriveExtension(ext)
     }
 

@@ -1,48 +1,22 @@
 package com.yomi.reader.util.conversion
 
 import android.content.Context
-import android.content.res.AssetManager
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.text.Layout
-import android.text.SpannableStringBuilder
-import android.text.Spanned
 import android.text.StaticLayout
 import android.text.TextPaint
-import android.text.style.BackgroundColorSpan
-import android.text.style.ForegroundColorSpan
-import android.text.style.LeadingMarginSpan
-import android.text.style.MetricAffectingSpan
-import android.text.style.RelativeSizeSpan
-import android.text.style.StrikethroughSpan
-import android.text.style.SubscriptSpan
-import android.text.style.SuperscriptSpan
-import android.text.style.TabStopSpan
-import android.text.style.UnderlineSpan
-import java.util.concurrent.ConcurrentHashMap
-import androidx.compose.ui.text.style.TextAlign
-import com.yomi.reader.parser.docx.DocxContentParser
-import com.yomi.reader.parser.docx.DocxElement
-import com.yomi.reader.parser.docx.DocxRun
-import com.yomi.reader.parser.pptx.PptxSlideParser
-import com.yomi.reader.parser.pptx.SlideElement
-import com.yomi.reader.parser.pptx.SlideParagraph
-import com.yomi.reader.parser.xlsx.SpreadsheetSheet
-import com.yomi.reader.parser.xlsx.XlsxSheetParser
+import com.yomi.reader.util.PdfToolsHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
-import kotlin.math.max
+import java.util.UUID
 import kotlin.math.min
 
 object OfflineDocumentConverter {
@@ -51,6 +25,15 @@ object OfflineDocumentConverter {
     private const val A4_PORTRAIT_HEIGHT = 842
     private const val A4_LANDSCAPE_WIDTH = 842
     private const val A4_LANDSCAPE_HEIGHT = 595
+
+    private val LEGACY_FULL_SHEET_EXTENSIONS = setOf("xls", "ods", "csv")
+
+    private val OFFICE_EXTENSIONS = setOf(
+        "doc", "docx",
+        "xls", "xlsx",
+        "ppt", "pptx",
+        "rtf", "odt", "ods", "odp", "csv"
+    )
 
     suspend fun convertToPdf(
         context: Context,
@@ -68,12 +51,15 @@ object OfflineDocumentConverter {
 
         try {
             onProgress(5)
-            when (extension) {
-                "docx", "doc" -> OfflineDocxToPdfConverter.convert(context, fileUri, targetFile, onProgress)
-                "xlsx", "xls" -> OfflineXlsxToPdfConverter.convert(context, fileUri, targetFile, onProgress)
-                "pptx", "ppt" -> OfflinePptxToPdfConverter.convert(context, fileUri, targetFile, onProgress)
-                "txt" -> convertText(context, fileUri, targetFile, onProgress)
-                "jpg", "jpeg", "png", "webp" -> convertImage(context, fileUri, targetFile, onProgress)
+            when {
+                extension in OFFICE_EXTENSIONS -> convertWithLibreOffice(
+                    context = context,
+                    fileUri = fileUri,
+                    extension = extension,
+                    outputFile = targetFile,
+                    onProgress = onProgress
+                )
+                extension in setOf("jpg", "jpeg", "png", "webp") -> convertImage(context, fileUri, targetFile, onProgress)
                 else -> convertText(context, fileUri, targetFile, onProgress)
             }
             onProgress(100)
@@ -81,6 +67,65 @@ object OfflineDocumentConverter {
         } catch (e: Exception) {
             targetFile.delete()
             Result.failure(e)
+        }
+    }
+
+    private suspend fun convertWithLibreOffice(
+        context: Context,
+        fileUri: Uri,
+        extension: String,
+        outputFile: File,
+        onProgress: (Int) -> Unit
+    ) {
+        val workDir = File(context.cacheDir, "lok_work").apply { mkdirs() }
+        val jobId = UUID.randomUUID().toString()
+        val tempInput = File(workDir, "$jobId.$extension")
+        val normalizedInput = File(workDir, "${jobId}_norm.$extension")
+        val tempOutput = File(workDir, "${jobId}_out.pdf")
+
+        try {
+            onProgress(15)
+            val inputStream = context.contentResolver.openInputStream(fileUri)
+                ?: throw IllegalArgumentException("Cannot open document stream at $fileUri")
+            inputStream.use { input ->
+                FileOutputStream(tempInput).use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            onProgress(35)
+            val libreOfficeInput = when {
+                extension == "docx" && DocxPreProcessor.normalizeForPdfExport(tempInput, normalizedInput) -> normalizedInput
+                extension == "xlsx" && XlsxPreProcessor.normalizeForPdfExport(tempInput, normalizedInput) -> normalizedInput
+                else -> tempInput
+            }
+            val filterOptions = if (extension in LEGACY_FULL_SHEET_EXTENSIONS) {
+                ",FullSheetPreview=trueFULLSHEETPREVEND"
+            } else {
+                ""
+            }
+            val conversionResult = LibreOfficePdfBridge.convertToPdf(
+                context = context,
+                inputFile = libreOfficeInput,
+                outputFile = tempOutput,
+                filterOptions = filterOptions
+            )
+            val generatedPdf = conversionResult.getOrElse { err ->
+                throw IllegalStateException(err.message ?: "LibreOfficeKit failed to convert .$extension", err)
+            }
+
+            onProgress(90)
+            outputFile.parentFile?.mkdirs()
+            if (outputFile.exists()) {
+                outputFile.delete()
+            }
+            if (!generatedPdf.renameTo(outputFile)) {
+                generatedPdf.copyTo(outputFile, overwrite = true)
+            }
+        } finally {
+            tempInput.delete()
+            normalizedInput.delete()
+            tempOutput.delete()
         }
     }
 
@@ -96,15 +141,15 @@ object OfflineDocumentConverter {
         val fullText = inputStream.bufferedReader().use { it.readText() }
         onProgress(30)
         val pdfDocument = PdfDocument()
-        val pageWidth = OfflinePdfRenderSupport.A4_PORTRAIT_WIDTH
-        val pageHeight = OfflinePdfRenderSupport.A4_PORTRAIT_HEIGHT
+        val pageWidth = A4_PORTRAIT_WIDTH
+        val pageHeight = A4_PORTRAIT_HEIGHT
         val margin = 48f
         val contentWidth = pageWidth - (margin * 2)
 
         val textPaint = TextPaint().apply {
             color = Color.BLACK
             textSize = 11f
-            typeface = OfflinePdfRenderSupport.resolveOfficeTypeface(context.assets, "Courier New", Typeface.NORMAL).typeface
+            typeface = Typeface.MONOSPACE
             isAntiAlias = true
         }
 
@@ -150,7 +195,7 @@ object OfflineDocumentConverter {
     }
 
     // ==========================================
-    // 5. Image -> PDF Conversion
+    // Image -> PDF Conversion
     // ==========================================
     private fun convertImage(
         context: Context,
@@ -159,15 +204,15 @@ object OfflineDocumentConverter {
         onProgress: (Int) -> Unit = {}
     ) {
         onProgress(25)
-        val bitmap = com.yomi.reader.util.PdfToolsHelper.decodeNormalizedBitmap(context, fileUri)
+        val bitmap = PdfToolsHelper.decodeNormalizedBitmap(context, fileUri)
             ?: throw IllegalArgumentException("Failed to decode image bitmap at $fileUri")
         onProgress(60)
 
         val pdfDocument = PdfDocument()
         try {
             val isLandscape = bitmap.width > bitmap.height
-            val pageWidth = if (isLandscape) OfflinePdfRenderSupport.A4_LANDSCAPE_WIDTH else OfflinePdfRenderSupport.A4_PORTRAIT_WIDTH
-            val pageHeight = if (isLandscape) OfflinePdfRenderSupport.A4_LANDSCAPE_HEIGHT else OfflinePdfRenderSupport.A4_PORTRAIT_HEIGHT
+            val pageWidth = if (isLandscape) A4_LANDSCAPE_WIDTH else A4_PORTRAIT_WIDTH
+            val pageHeight = if (isLandscape) A4_LANDSCAPE_HEIGHT else A4_PORTRAIT_HEIGHT
             val margin = 32f
 
             val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()

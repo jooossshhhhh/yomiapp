@@ -12,7 +12,6 @@ navigation = "2.8.2"
 room = "2.6.1"
 work = "2.9.1"
 coil = "2.7.0"
-poi = "5.2.5"
 desugar = "2.1.2"
 documentfile = "1.0.1"
 coroutines = "1.9.0"
@@ -47,10 +46,6 @@ androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx"
 
 # Image Loading
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
-
-# Office Parsing (Apache POI)
-apache-poi = { group = "org.apache.poi", name = "poi", version.ref = "poi" }
-apache-poi-ooxml = { group = "org.apache.poi", name = "poi-ooxml", version.ref = "poi" }
 
 # Desugaring
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar" }

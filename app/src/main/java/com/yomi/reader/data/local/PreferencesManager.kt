@@ -13,6 +13,8 @@ import com.yomi.reader.ui.dashboard.components.FolderAppearanceCatalog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
+import java.security.MessageDigest
 
 enum class ThemeMode {
     SYSTEM, LIGHT, DARK
@@ -394,6 +396,51 @@ class PreferencesManager(context: Context) {
         _driveLocalCopies.value = updated
     }
 
+    private val _driveCachedFiles = MutableStateFlow(loadDriveCachedFiles())
+    val driveCachedFiles: StateFlow<Map<String, String>> = _driveCachedFiles.asStateFlow()
+
+    private fun loadDriveCachedFiles(): Map<String, String> {
+        val raw = prefs.getString("drive_cached_files_json", null) ?: return emptyMap()
+        return runCatching {
+            val obj = org.json.JSONObject(raw)
+            val map = mutableMapOf<String, String>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = obj.optString(key)
+                if (key.isNotBlank() && value.isNotBlank()) {
+                    map[key] = value
+                }
+            }
+            map
+        }.getOrDefault(emptyMap())
+    }
+
+    fun computeDriveCacheTargetFile(driveUriString: String, fileName: String): File {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(driveUriString.toByteArray(Charsets.UTF_8))
+            .take(8)
+            .joinToString("") { "%02x".format(it) }
+        val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "file" }
+        val cacheDir = File(appContext.filesDir, "drive_cache").apply {
+            if (!exists()) mkdirs()
+        }
+        return File(cacheDir, "${digest}_$safeName")
+    }
+
+    fun getExistingDriveCachedFile(driveUriString: String): File? {
+        val path = _driveCachedFiles.value[driveUriString] ?: return null
+        val file = File(path)
+        return if (file.isFile && file.length() > 0L) file else null
+    }
+
+    fun saveDriveCachedFiles(map: Map<String, String>) {
+        val obj = org.json.JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        prefs.edit().putString("drive_cached_files_json", obj.toString()).apply()
+        _driveCachedFiles.value = map
+    }
+
     fun clearConnectedDriveFolder() {
         val currentUri = _connectedDriveFolderUri.value
         if (!currentUri.isNullOrBlank() && !currentUri.startsWith("http", ignoreCase = true)) {
@@ -412,18 +459,28 @@ class PreferencesManager(context: Context) {
                 )
             }
         }
+        // Delete offline cached Drive source files to reclaim storage, while preserving
+        // any PDFs already converted or imported into Yomi (Converted_PDFs / Imported_PDFs).
+        _driveCachedFiles.value.values.forEach { path ->
+            runCatching { File(path).delete() }
+        }
+        runCatching {
+            File(appContext.filesDir, "drive_cache").deleteRecursively()
+        }
         prefs.edit()
             .remove("connected_drive_folder_uri")
             .remove("connected_drive_folder_name")
             .remove("synced_drive_uris")
             .remove("synced_drive_folders_json")
             .remove("synced_drive_files_json")
+            .remove("drive_cached_files_json")
             .apply()
         _connectedDriveFolderUri.value = null
         _connectedDriveFolderName.value = null
         _syncedDriveUris.value = emptySet()
         _driveFolders.value = emptyList()
         _driveFiles.value = emptyList()
+        _driveCachedFiles.value = emptyMap()
     }
 
     fun setLastDriveSyncTime(time: Long) {

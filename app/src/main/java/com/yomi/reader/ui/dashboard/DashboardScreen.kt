@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import com.yomi.reader.ui.theme.DocsAiPillMint
 import com.yomi.reader.ui.theme.DocsFabLime
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Edit
@@ -250,6 +251,14 @@ fun DashboardScreen(
     var driveLinkErrorMessage by remember { mutableStateOf<String?>(null) }
     var driveLinkRestrictedFallbackUrl by remember { mutableStateOf<String?>(null) }
     val recentDriveLinks by preferencesManager.recentDriveLinks.collectAsState()
+    val cachedDriveFiles by preferencesManager.driveCachedFiles.collectAsState()
+    val driveSyncInterruptedAlert by viewModel.driveSyncInterruptedAlert.collectAsState()
+    var isDriveSyncBannerHidden by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.isDriveSyncing) {
+        if (!uiState.isDriveSyncing) {
+            isDriveSyncBannerHidden = false
+        }
+    }
     var driveOperationMessage by remember { mutableStateOf<String?>(null) }
     var customFolderToRename by remember { mutableStateOf<String?>(null) }
     var customFolderToConfirmDelete by remember { mutableStateOf<String?>(null) }
@@ -666,12 +675,7 @@ fun DashboardScreen(
                     viewModel.moveDocumentToFolder(convertedDoc, activeTargetFolder)
                 }
                 importedConverted = convertedDoc
-                val modeMsg = when {
-                    success.isOffline -> " (Offline)"
-                    success.engineName != "iLovePDF Primary" -> " (${success.engineName})"
-                    else -> ""
-                }
-                Toast.makeText(context, "Converted $finalTitle to PDF$modeMsg", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Converted $finalTitle to PDF", Toast.LENGTH_SHORT).show()
             }.onFailure { error ->
                 Toast.makeText(context, "Conversion failed: ${error.message}", Toast.LENGTH_LONG).show()
             }
@@ -904,7 +908,10 @@ fun DashboardScreen(
                     Toast.LENGTH_SHORT
                 ).show()
             }.onFailure { error ->
-                if (error is RestrictedDriveFolderException) {
+                if (error is com.yomi.reader.data.remote.IncompleteDriveSyncException) {
+                    showPasteDriveLinkDialog = false
+                    openGoogleDriveFolder()
+                } else if (error is RestrictedDriveFolderException) {
                     driveLinkErrorMessage = error.message
                     driveLinkRestrictedFallbackUrl = error.folderUrl
                 } else {
@@ -953,8 +960,24 @@ fun DashboardScreen(
             }
             val resolvedBase = resolvedTitle.substringBeforeLast('.', resolvedTitle)
 
+            val cachedOfflineFile = preferencesManager.getExistingDriveCachedFile(driveFile.uriString)
+            val isOnline = com.yomi.reader.util.NetworkUtils.isOnline(context)
+            val needsNetworkDownload = cachedOfflineFile == null || (forceFreshCopy && isOnline)
+            if (needsNetworkDownload && !isOnline) {
+                Toast.makeText(
+                    context,
+                    "\"${driveFile.name}\" is not cached offline yet. Connect to the internet and tap Sync in the Drive folder first.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+
             if (isPdf) {
-                driveOperationMessage = "Downloading local Yomi copy of \"${driveFile.name}\"..."
+                driveOperationMessage = if (cachedOfflineFile != null && !forceFreshCopy) {
+                    "Opening offline cached copy of \"${driveFile.name}\"..."
+                } else {
+                    "Downloading local Yomi copy of \"${driveFile.name}\"..."
+                }
                 val copyResult = withContext(Dispatchers.IO) {
                     runCatching {
                         val docsRoot = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
@@ -963,18 +986,25 @@ fun DashboardScreen(
                         if (targetFile.exists()) {
                             targetFile = File(importedDir, "${resolvedBase}_${System.currentTimeMillis()}.pdf")
                         }
-                        if (isHttpSource) {
-                            GoogleDriveSharedLinkClient.downloadDriveUrlToFile(
-                                sourceUrl = driveFile.uriString,
-                                targetFile = targetFile
-                            ).getOrThrow()
-                        } else {
-                            context.contentResolver.openInputStream(driveUri)?.use { input ->
-                                FileOutputStream(targetFile).use { output ->
-                                    input.copyTo(output)
-                                }
-                            } ?: throw IllegalStateException("Unable to read \"${driveFile.name}\" from Drive")
-                            targetFile
+                        when {
+                            cachedOfflineFile != null && (!forceFreshCopy || !isOnline) -> {
+                                cachedOfflineFile.copyTo(targetFile, overwrite = true)
+                                targetFile
+                            }
+                            isHttpSource -> {
+                                GoogleDriveSharedLinkClient.downloadDriveUrlToFile(
+                                    sourceUrl = driveFile.uriString,
+                                    targetFile = targetFile
+                                ).getOrThrow()
+                            }
+                            else -> {
+                                context.contentResolver.openInputStream(driveUri)?.use { input ->
+                                    FileOutputStream(targetFile).use { output ->
+                                        input.copyTo(output)
+                                    }
+                                } ?: throw IllegalStateException("Unable to read \"${driveFile.name}\" from Drive")
+                                targetFile
+                            }
                         }
                     }
                 }
@@ -1003,33 +1033,36 @@ fun DashboardScreen(
                 }.onFailure { error ->
                     Toast.makeText(
                         context,
-                        "Could not download Drive PDF: ${error.message}",
+                        "Could not open Drive PDF: ${error.message}",
                         Toast.LENGTH_LONG
                     ).show()
                 }
             } else {
                 conversionProgress = 0
                 convertingDocTitle = resolvedTitle
-                val tempCachedSource: File? = if (isHttpSource) {
+                val useCachedSource = cachedOfflineFile != null && (!forceFreshCopy || !isOnline)
+                val tempCachedSource: File? = if (!useCachedSource && isHttpSource) {
                     val safeTempName = driveFile.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
                     File(context.cacheDir, "drive_link_${System.currentTimeMillis()}_$safeTempName")
                 } else null
 
                 val conversionResult = withContext(Dispatchers.IO) {
                     try {
-                        val sourceUriForConversion = if (isHttpSource && tempCachedSource != null) {
-                            val dl = GoogleDriveSharedLinkClient.downloadDriveUrlToFile(
-                                sourceUrl = driveFile.uriString,
-                                targetFile = tempCachedSource
-                            )
-                            if (dl.isFailure) {
-                                return@withContext Result.failure(
-                                    dl.exceptionOrNull() ?: IllegalStateException("Failed downloading file from Drive link")
+                        val sourceUriForConversion = when {
+                            useCachedSource -> Uri.fromFile(cachedOfflineFile!!)
+                            isHttpSource && tempCachedSource != null -> {
+                                val dl = GoogleDriveSharedLinkClient.downloadDriveUrlToFile(
+                                    sourceUrl = driveFile.uriString,
+                                    targetFile = tempCachedSource
                                 )
+                                if (dl.isFailure) {
+                                    return@withContext Result.failure(
+                                        dl.exceptionOrNull() ?: IllegalStateException("Failed downloading file from Drive link")
+                                    )
+                                }
+                                Uri.fromFile(tempCachedSource)
                             }
-                            Uri.fromFile(tempCachedSource)
-                        } else {
-                            driveUri
+                            else -> driveUri
                         }
                         DocumentConverter.convertUriToPdfDetailed(
                             context = context,
@@ -1055,14 +1088,9 @@ fun DashboardScreen(
                     )
                     preferencesManager.setDriveLocalCopy(driveFile.uriString, convertedDoc.uriString)
                     convertedRefreshTrigger++
-                    val modeMsg = when {
-                    success.isOffline -> " (Offline)"
-                    success.engineName != "iLovePDF Primary" -> " (${success.engineName})"
-                    else -> ""
-                }
                     Toast.makeText(
                         context,
-                        "Converted & saved local copy: $resolvedTitle$modeMsg",
+                        "Converted & saved local copy: $resolvedTitle",
                         Toast.LENGTH_SHORT
                     ).show()
                     onOpenDocument(convertedDoc)
@@ -1343,7 +1371,7 @@ fun DashboardScreen(
             .yomiPaperBackground()
     ) { innerPadding ->
         val pullToRefreshState = rememberPullToRefreshState()
-        val isRefreshing = uiState.isScanning || uiState.isDriveSyncing
+        val isRefreshing = uiState.isScanning
         PullToRefreshBox(
             state = pullToRefreshState,
             isRefreshing = isRefreshing,
@@ -1423,8 +1451,69 @@ fun DashboardScreen(
                         uiState.selectedCustomFolder == null
                     val hasDriveFiles = isInsideDriveFolder && uiState.driveFiles.isNotEmpty()
                     val hasItems = tabDocuments.isNotEmpty() || hasDriveFiles || uiState.currentSubfolders.isNotEmpty()
-                    val isInitialScanningFeed = (uiState.isScanning || uiState.isDriveSyncing) && !hasItems &&
+                    val isInitialScanningFeed = uiState.isScanning && !hasItems &&
                         uiState.searchQuery.isEmpty() && uiState.selectedCustomFolder == null
+
+                    if (isInsideDriveFolder && uiState.isDriveSyncing && uiState.driveSyncProgressPercent != null && !isDriveSyncBannerHidden) {
+                        val syncPct = uiState.driveSyncProgressPercent ?: 0
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = uiState.driveSyncStatusText ?: "Caching Drive files for offline access...",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "${syncPct}%",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        onClick = { isDriveSyncBannerHidden = true },
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                    ) {
+                                        Text(
+                                            text = "Hide",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                LinearProgressIndicator(
+                                    progress = { (syncPct / 100f).coerceIn(0f, 1f) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(5.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                )
+                            }
+                        }
+                    }
 
                     if (tabIsFoldersRootOnly) {
                         LazyColumn(
@@ -1438,6 +1527,10 @@ fun DashboardScreen(
                                     connectedFolderUri = connectedDriveFolderUri,
                                     connectedFolderName = connectedDriveFolderName,
                                     isSyncing = uiState.isDriveSyncing,
+                                    syncProgressPercent = uiState.driveSyncProgressPercent,
+                                    syncStatusText = uiState.driveSyncStatusText,
+                                    isProgressHidden = isDriveSyncBannerHidden,
+                                    onHideProgress = { isDriveSyncBannerHidden = true },
                                     isSignedIn = currentUser != null,
                                     onOpenDriveFolder = { openGoogleDriveFolder() },
                                     onConnectDriveFolder = {
@@ -1483,7 +1576,7 @@ fun DashboardScreen(
                                 )
                             }
                         }
-                    } else if (isInitialScanningFeed || ((uiState.isScanning || uiState.isDriveSyncing) && tabIsInsideFolder && !hasItems)) {
+                    } else if (isInitialScanningFeed || (uiState.isScanning && tabIsInsideFolder && !hasItems)) {
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -1976,9 +2069,13 @@ fun DashboardScreen(
                                         contentType = { "DriveFileCard" }
                                     ) { driveFile ->
                                         val localCopyDoc = viewModel.resolveExistingLocalCopy(driveFile.uriString)
+                                        val isCachedOffline = cachedDriveFiles[driveFile.uriString]?.let { path ->
+                                            File(path).let { cached -> cached.isFile && cached.length() > 0L }
+                                        } ?: false
                                         DriveFileCard(
                                             driveFile = driveFile,
                                             isSavedLocally = localCopyDoc != null,
+                                            isCachedOffline = isCachedOffline,
                                             onOpenAsLocalCopy = {
                                                 openDriveFileAsLocalYomiCopy(driveFile, forceFreshCopy = false)
                                             },
@@ -2368,6 +2465,8 @@ fun DashboardScreen(
             recentLinks = recentDriveLinks,
             initialLink = currentLink,
             isLoading = isOpeningDriveLink,
+            syncProgressPercent = uiState.driveSyncProgressPercent,
+            syncStatusText = uiState.driveSyncStatusText,
             errorMessage = driveLinkErrorMessage,
             restrictedFallbackUrl = driveLinkRestrictedFallbackUrl,
             onSubmitLink = { submitted -> submitDriveFolderLink(submitted) },
@@ -2378,8 +2477,54 @@ fun DashboardScreen(
                 openDriveLinkInExternalApp(fallbackUrl)
             },
             onDismiss = {
-                if (!isOpeningDriveLink) {
-                    showPasteDriveLinkDialog = false
+                showPasteDriveLinkDialog = false
+            }
+        )
+    }
+
+    driveSyncInterruptedAlert?.let { alert ->
+        val remainingCount = (alert.totalCount - alert.cachedCount).coerceAtLeast(0)
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissDriveSyncInterruptedAlert() },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.WifiOff,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = "Folder Sync Not Finished",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = buildString {
+                        append("\"${alert.folderName}\" has not finished syncing because your internet connection went out")
+                        if (alert.totalCount > 0) {
+                            append(" (${alert.cachedCount} of ${alert.totalCount} files cached).")
+                        } else {
+                            append(".")
+                        }
+                        append("\n\n")
+                        if (alert.cachedCount > 0) {
+                            append("All ${alert.cachedCount} already cached file(s) will still open and convert offline. ")
+                        }
+                        if (remainingCount > 0) {
+                            append("Reconnect to the internet and tap Sync later to download the remaining $remainingCount file(s).")
+                        } else {
+                            append("Reconnect to the internet and tap Sync to finish checking all subfolders.")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(onClick = { viewModel.dismissDriveSyncInterruptedAlert() }) {
+                    Text("OK")
                 }
             }
         )
@@ -2391,7 +2536,11 @@ fun DashboardScreen(
             onConfirmUnlink = {
                 viewModel.unlinkDriveFolder()
                 showUnlinkDriveConfirmDialog = false
-                Toast.makeText(context, "Unlinked Google Drive folder", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    context,
+                    "Unlinked Drive folder & freed cached files (saved PDFs kept)",
+                    Toast.LENGTH_SHORT
+                ).show()
             },
             onDismiss = { showUnlinkDriveConfirmDialog = false }
         )

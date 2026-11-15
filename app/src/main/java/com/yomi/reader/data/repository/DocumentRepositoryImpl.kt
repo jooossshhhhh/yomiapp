@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import com.yomi.reader.data.local.dao.DocumentDao
 import com.yomi.reader.data.local.entity.DocumentEntity
 import com.yomi.reader.data.remote.GoogleDriveSharedLinkClient
+import com.yomi.reader.data.remote.IncompleteDriveSyncException
 import com.yomi.reader.domain.model.DocumentCategory
 import com.yomi.reader.domain.model.DocumentItem
 import com.yomi.reader.domain.model.DocumentType
@@ -16,13 +17,23 @@ import com.yomi.reader.domain.model.DriveFolderItem
 import com.yomi.reader.domain.model.SavedDriveLink
 import com.yomi.reader.domain.repository.DocumentRepository
 import com.yomi.reader.util.DriveFolderSafetyHelper
+import com.yomi.reader.util.NetworkUtils
 import kotlinx.coroutines.Dispatchers
 import androidx.documentfile.provider.DocumentFile
 import com.yomi.reader.data.local.PreferencesManager
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 class DocumentRepositoryImpl(
     private val context: Context,
@@ -195,13 +206,21 @@ class DocumentRepositoryImpl(
         discovered.size
     }
 
-    override suspend fun syncDriveFolder(treeUri: Uri): Int = withContext(Dispatchers.IO) {
+    override suspend fun syncDriveFolder(
+        treeUri: Uri,
+        onProgress: (completed: Int, total: Int, percent: Int, statusText: String) -> Unit
+    ): Int = withContext(Dispatchers.IO) {
         if (treeUri.scheme.equals("http", ignoreCase = true) ||
             treeUri.scheme.equals("https", ignoreCase = true)
         ) {
-            syncDriveLinkFolder(folderUrlOrId = treeUri.toString(), parentPath = "")
+            syncDriveLinkFolder(
+                folderUrlOrId = treeUri.toString(),
+                parentPath = "",
+                onProgress = onProgress
+            )
             return@withContext preferencesManager.driveFiles.value.size
         }
+        onProgress(0, 0, 5, "Scanning Drive folder...")
         val treeDoc = runCatching { DocumentFile.fromTreeUri(context, treeUri) }.getOrNull()
             ?: return@withContext 0
         val discoveredFolders = mutableListOf<DriveFolderItem>()
@@ -284,16 +303,36 @@ class DocumentRepositoryImpl(
         if (syncedUris.isNotEmpty()) {
             preferencesManager.addSyncedDriveUris(syncedUris)
         }
+
+        cacheSafDriveFiles(discoveredFiles, onProgress)
+
         preferencesManager.setLastDriveSyncTime(System.currentTimeMillis())
+        onProgress(discoveredFiles.size, discoveredFiles.size, 100, "Offline sync complete (100%)")
         discoveredFiles.size
     }
 
     override suspend fun syncDriveLinkFolder(
         folderUrlOrId: String,
         parentPath: String,
-        accessToken: String?
+        accessToken: String?,
+        onProgress: (completed: Int, total: Int, percent: Int, statusText: String) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
-        val fetched = GoogleDriveSharedLinkClient.fetchFolderContents(
+        if (!NetworkUtils.isOnline(context)) {
+            val hasExistingCache = preferencesManager.driveFiles.value.isNotEmpty() ||
+                preferencesManager.driveFolders.value.isNotEmpty()
+            val connectedUri = preferencesManager.connectedDriveFolderUri.value
+            if (hasExistingCache && !connectedUri.isNullOrBlank()) {
+                return@withContext Result.success(
+                    preferencesManager.connectedDriveFolderName.value ?: "Connected Drive Folder"
+                )
+            }
+            return@withContext Result.failure(
+                IllegalStateException("Internet connection is required to initialize and cache this Google Drive folder.")
+            )
+        }
+
+        onProgress(0, 0, 5, "Connecting to Google Drive folder...")
+        val rootFetched = GoogleDriveSharedLinkClient.fetchFolderContents(
             folderUrlOrId = folderUrlOrId,
             parentPath = parentPath,
             accessToken = accessToken
@@ -302,33 +341,340 @@ class DocumentRepositoryImpl(
         }
 
         if (parentPath.isBlank()) {
-            preferencesManager.setConnectedDriveFolder(fetched.canonicalUrl, fetched.folderName)
+            val allFolders = mutableListOf<DriveFolderItem>()
+            val allFiles = mutableListOf<DriveFileItem>()
+            allFolders.addAll(rootFetched.subfolders)
+            allFiles.addAll(rootFetched.files)
+
+            // Crawl nested subfolders upfront so all subfolders & files are available offline.
+            val queue = ArrayDeque<Pair<DriveFolderItem, Int>>()
+            rootFetched.subfolders.forEach { queue.addLast(it to 1) }
+            val visitedUrls = hashSetOf<String>()
+            var fetchedFolderCount = 1
+            var crawlInterruptedOffline = false
+            while (queue.isNotEmpty() && fetchedFolderCount < 50) {
+                if (!NetworkUtils.isOnline(context)) {
+                    crawlInterruptedOffline = true
+                    break
+                }
+                val (sub, depth) = queue.removeFirst()
+                val subUrl = sub.uriString ?: continue
+                if (depth > 5 || !visitedUrls.add(subUrl)) continue
+                val denom = (fetchedFolderCount + queue.size + 1).coerceAtLeast(1)
+                val scanPct = (5 + (fetchedFolderCount * 9 / denom)).coerceIn(5, 14)
+                onProgress(
+                    0,
+                    0,
+                    scanPct,
+                    "Scanning subfolder: ${sub.name} ($scanPct%)..."
+                )
+                val subRes = GoogleDriveSharedLinkClient.fetchFolderContents(
+                    folderUrlOrId = subUrl,
+                    parentPath = sub.path,
+                    accessToken = accessToken
+                )
+                if (subRes.isSuccess) {
+                    val subOutcome = subRes.getOrThrow()
+                    fetchedFolderCount++
+                    allFolders.addAll(subOutcome.subfolders)
+                    allFiles.addAll(subOutcome.files)
+                    subOutcome.subfolders.forEach { child ->
+                        queue.addLast(child to (depth + 1))
+                    }
+                } else if (!NetworkUtils.isOnline(context)) {
+                    crawlInterruptedOffline = true
+                    break
+                }
+            }
+
+            preferencesManager.setConnectedDriveFolder(rootFetched.canonicalUrl, rootFetched.folderName)
             preferencesManager.addRecentDriveLink(
                 SavedDriveLink(
-                    folderId = fetched.folderId,
-                    url = fetched.canonicalUrl,
-                    name = fetched.folderName,
+                    folderId = rootFetched.folderId,
+                    url = rootFetched.canonicalUrl,
+                    name = rootFetched.folderName,
                     lastOpenedAt = System.currentTimeMillis()
                 )
             )
-            preferencesManager.saveDriveFolders(fetched.subfolders)
-            preferencesManager.saveDriveFiles(fetched.files)
+            preferencesManager.saveDriveFolders(allFolders)
+            preferencesManager.saveDriveFiles(allFiles)
+
+            // Seed with any existing cached paths for active files so already-cached files stay available offline
+            val summary = cacheHttpDriveFiles(
+                files = allFiles,
+                retainExistingKeys = allFiles.map { it.uriString }.toSet(),
+                accessToken = accessToken,
+                onProgress = onProgress
+            )
+            if (crawlInterruptedOffline || summary.interruptedOffline) {
+                return@withContext Result.failure(
+                    IncompleteDriveSyncException(
+                        folderName = rootFetched.folderName,
+                        cachedCount = summary.cachedCount,
+                        totalCount = summary.totalCount,
+                        message = "Internet connection was lost while syncing \"${rootFetched.folderName}\"."
+                    )
+                )
+            }
         } else {
             val childPrefix = "$parentPath/"
             val preservedFolders = preferencesManager.driveFolders.value
                 .filterNot { it.parentPath == parentPath || it.parentPath.startsWith(childPrefix) }
                 .map { item ->
-                    if (item.path == parentPath) item.copy(fileCount = fetched.files.size) else item
+                    if (item.path == parentPath) item.copy(fileCount = rootFetched.files.size) else item
                 }
             val preservedFiles = preferencesManager.driveFiles.value
                 .filterNot { it.parentPath == parentPath || it.parentPath.startsWith(childPrefix) }
 
-            preferencesManager.saveDriveFolders(preservedFolders + fetched.subfolders)
-            preferencesManager.saveDriveFiles(preservedFiles + fetched.files)
+            val mergedFiles = preservedFiles + rootFetched.files
+            preferencesManager.saveDriveFolders(preservedFolders + rootFetched.subfolders)
+            preferencesManager.saveDriveFiles(mergedFiles)
+
+            val summary = cacheHttpDriveFiles(
+                files = rootFetched.files,
+                retainExistingKeys = mergedFiles.map { it.uriString }.toSet(),
+                accessToken = accessToken,
+                onProgress = onProgress
+            )
+            val subfolderName = parentPath.substringAfterLast('/').ifBlank { rootFetched.folderName }
+            if (summary.interruptedOffline) {
+                return@withContext Result.failure(
+                    IncompleteDriveSyncException(
+                        folderName = subfolderName,
+                        cachedCount = summary.cachedCount,
+                        totalCount = summary.totalCount,
+                        message = "Internet connection was lost while syncing \"$subfolderName\"."
+                    )
+                )
+            }
         }
 
         preferencesManager.setLastDriveSyncTime(System.currentTimeMillis())
-        Result.success(fetched.folderName)
+        val syncedTotal = preferencesManager.driveFiles.value.size
+        onProgress(
+            syncedTotal,
+            syncedTotal,
+            100,
+            "Synced for offline use (100%)"
+        )
+        Result.success(rootFetched.folderName)
+    }
+
+    private fun cacheSafDriveFiles(
+        files: List<DriveFileItem>,
+        onProgress: (completed: Int, total: Int, percent: Int, statusText: String) -> Unit
+    ) {
+        val supportedFiles = files.filter { DriveFolderSafetyHelper.isSupportedDriveFile(it.name) }
+        val total = supportedFiles.size
+        if (total == 0) {
+            preferencesManager.saveDriveCachedFiles(emptyMap())
+            onProgress(0, 0, 100, "No supported files to cache")
+            return
+        }
+        val activeKeys = supportedFiles.map { it.uriString }.toSet()
+        val updatedCache = preferencesManager.driveCachedFiles.value
+            .filterKeys { it in activeKeys }
+            .toMutableMap()
+
+        supportedFiles.forEachIndexed { index, file ->
+            val pct = (10 + (index * 90 / total)).coerceIn(10, 99)
+            onProgress(index, total, pct, "Caching ${file.name} (${pct}%)")
+
+            val target = preferencesManager.computeDriveCacheTargetFile(file.uriString, file.name)
+            val alreadyValid = target.isFile && target.length() > 0L &&
+                (file.sizeBytes <= 0L || target.length() == file.sizeBytes)
+            if (!alreadyValid) {
+                val tempPart = File(target.parentFile, "${target.name}.part")
+                runCatching {
+                    context.contentResolver.openInputStream(Uri.parse(file.uriString))?.use { input ->
+                        FileOutputStream(tempPart).use { output ->
+                            input.copyTo(output)
+                        }
+                    } ?: error("Cannot open Drive SAF stream")
+                    if (tempPart.isFile && tempPart.length() > 0L) {
+                        if (target.exists()) target.delete()
+                        if (!tempPart.renameTo(target)) {
+                            tempPart.copyTo(target, overwrite = true)
+                            tempPart.delete()
+                        }
+                    } else {
+                        tempPart.delete()
+                    }
+                }.onFailure {
+                    tempPart.delete()
+                }
+            }
+            if (target.isFile && target.length() > 0L) {
+                updatedCache[file.uriString] = target.absolutePath
+                // Save incrementally so cached files remain readable offline even if sync stops early
+                preferencesManager.saveDriveCachedFiles(updatedCache.toMap())
+            }
+            val donePct = (10 + ((index + 1) * 90 / total)).coerceIn(10, 100)
+            onProgress(index + 1, total, donePct, "Cached ${index + 1} of $total (${donePct}%)")
+        }
+
+        pruneOrphanDriveCacheFiles(updatedCache.values.toSet())
+        preferencesManager.saveDriveCachedFiles(updatedCache)
+    }
+
+    private data class HttpCacheSummary(
+        val cachedCount: Int,
+        val totalCount: Int,
+        val interruptedOffline: Boolean
+    )
+
+    private suspend fun cacheHttpDriveFiles(
+        files: List<DriveFileItem>,
+        retainExistingKeys: Set<String>,
+        accessToken: String?,
+        onProgress: (completed: Int, total: Int, percent: Int, statusText: String) -> Unit
+    ): HttpCacheSummary {
+        val supportedFiles = files.filter { DriveFolderSafetyHelper.isSupportedDriveFile(it.name) }
+        val total = supportedFiles.size
+        val existingCache = preferencesManager.driveCachedFiles.value
+        val updatedCache = if (retainExistingKeys.isNotEmpty()) {
+            existingCache.filterKeys { it in retainExistingKeys }.toMutableMap()
+        } else {
+            mutableMapOf()
+        }
+
+        if (total == 0) {
+            pruneOrphanDriveCacheFiles(updatedCache.values.toSet())
+            preferencesManager.saveDriveCachedFiles(updatedCache)
+            onProgress(0, 0, 100, "Folder synced (100%)")
+            return HttpCacheSummary(cachedCount = 0, totalCount = 0, interruptedOffline = false)
+        }
+
+        val stateMutex = Mutex()
+        val semaphore = Semaphore(3)
+        val fileProgress = DoubleArray(total)
+        val cachedFlags = BooleanArray(total)
+        var lastReportedPct = 15
+        var cachedCount = 0
+        var interruptedOffline = false
+
+        // Pre-account already-cached files so percentage starts accurately
+        supportedFiles.forEachIndexed { idx, file ->
+            val target = preferencesManager.computeDriveCacheTargetFile(file.uriString, file.name)
+            val alreadyValid = target.isFile && target.length() > 0L &&
+                (file.sizeBytes <= 0L || target.length() == file.sizeBytes)
+            if (alreadyValid) {
+                fileProgress[idx] = 1.0
+                cachedFlags[idx] = true
+                cachedCount++
+                updatedCache[file.uriString] = target.absolutePath
+            }
+        }
+        val initialPct = (15 + ((fileProgress.sum() / total) * 85.0).toInt()).coerceIn(15, if (cachedCount == total) 100 else 99)
+        lastReportedPct = initialPct
+        onProgress(cachedCount, total, initialPct, "Caching $total Drive files ($initialPct%)...")
+
+        coroutineScope {
+            supportedFiles.mapIndexed { idx, file ->
+                async(Dispatchers.IO) {
+                    if (cachedFlags[idx]) return@async
+                    semaphore.withPermit {
+                        if (interruptedOffline || !NetworkUtils.isOnline(context)) {
+                            stateMutex.withLock { interruptedOffline = true }
+                            return@withPermit
+                        }
+
+                        val target = preferencesManager.computeDriveCacheTargetFile(file.uriString, file.name)
+                        val tempPart = File(target.parentFile, "${target.name}.part")
+                        val dl = GoogleDriveSharedLinkClient.downloadDriveUrlToFile(
+                            sourceUrl = file.uriString,
+                            targetFile = tempPart,
+                            accessToken = accessToken,
+                            onProgressBytes = { bytesRead, contentLen ->
+                                val expectedTotal = if (contentLen > 0L) contentLen else file.sizeBytes
+                                val frac = if (expectedTotal > 0L) {
+                                    (bytesRead.toDouble() / expectedTotal.toDouble()).coerceIn(0.02, 0.96)
+                                } else {
+                                    0.35
+                                }
+                                // Non-blocking best-effort smooth % tick
+                                if (stateMutex.tryLock()) {
+                                    try {
+                                        if (!cachedFlags[idx]) {
+                                            fileProgress[idx] = maxOf(fileProgress[idx], frac)
+                                            val livePct = (15 + ((fileProgress.sum() / total) * 85.0).toInt())
+                                                .coerceIn(lastReportedPct, 99)
+                                            if (livePct > lastReportedPct) {
+                                                lastReportedPct = livePct
+                                                onProgress(
+                                                    cachedCount,
+                                                    total,
+                                                    livePct,
+                                                    "Caching $cachedCount of $total • ${file.name} (${livePct}%)"
+                                                )
+                                            }
+                                        }
+                                    } finally {
+                                        stateMutex.unlock()
+                                    }
+                                }
+                            }
+                        )
+
+                        var fileSucceeded = false
+                        if (dl.isSuccess && tempPart.isFile && tempPart.length() > 0L) {
+                            if (target.exists()) target.delete()
+                            if (!tempPart.renameTo(target)) {
+                                tempPart.copyTo(target, overwrite = true)
+                                tempPart.delete()
+                            }
+                            fileSucceeded = target.isFile && target.length() > 0L
+                        } else {
+                            tempPart.delete()
+                        }
+
+                        stateMutex.withLock {
+                            if (fileSucceeded) {
+                                fileProgress[idx] = 1.0
+                                cachedFlags[idx] = true
+                                cachedCount++
+                                updatedCache[file.uriString] = target.absolutePath
+                                preferencesManager.saveDriveCachedFiles(updatedCache.toMap())
+                            } else {
+                                fileProgress[idx] = 0.0
+                                if (!NetworkUtils.isOnline(context)) {
+                                    interruptedOffline = true
+                                }
+                            }
+                            val exactPct = (15 + ((fileProgress.sum() / total) * 85.0).toInt())
+                                .coerceIn(lastReportedPct, if (cachedCount == total) 100 else 99)
+                            lastReportedPct = exactPct
+                            val label = if (interruptedOffline) {
+                                "Sync paused offline ($cachedCount of $total cached)"
+                            } else {
+                                "Cached $cachedCount of $total • ${file.name} (${exactPct}%)"
+                            }
+                            onProgress(cachedCount, total, exactPct, label)
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+
+        if (!interruptedOffline) {
+            pruneOrphanDriveCacheFiles(updatedCache.values.toSet())
+        }
+        preferencesManager.saveDriveCachedFiles(updatedCache)
+        return HttpCacheSummary(
+            cachedCount = cachedCount,
+            totalCount = total,
+            interruptedOffline = interruptedOffline && cachedCount < total
+        )
+    }
+
+    private fun pruneOrphanDriveCacheFiles(validPaths: Set<String>) {
+        val cacheDir = File(context.filesDir, "drive_cache")
+        if (!cacheDir.isDirectory) return
+        cacheDir.listFiles()?.forEach { file ->
+            if (file.absolutePath !in validPaths) {
+                runCatching { file.delete() }
+            }
+        }
     }
 
     private fun resolveTargetDriveDirectory(treeUri: Uri, parentPath: String): DocumentFile? {

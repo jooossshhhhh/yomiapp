@@ -17,6 +17,8 @@ data class DashboardUiState(
     val isLoading: Boolean = false,
     val isScanning: Boolean = false,
     val isDriveSyncing: Boolean = false,
+    val driveSyncProgressPercent: Int? = null,
+    val driveSyncStatusText: String? = null,
     val isDriveLinkMode: Boolean = false,
     val currentFolderPath: String = "", // Current folder relative path, empty = root
     val currentFolderDisplayName: String = "", // e.g. "PRDS_Capstone_Project" or "Word_Files(Present)"
